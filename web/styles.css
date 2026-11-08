@@ -211,3 +211,10 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .folder-select { margin: 0 10px 0 0; }
   .folder-creation .input-group .field { min-width: 0; flex: 1; }
 }
+
+/* Folder browser: click opens a subdirectory, only footer explicitly selects it. */
+.browse-notice { margin: 8px 24px; border: 1px solid #2c665d; background: #143b35; color: #a0e7ce; border-radius: 8px; padding: 10px 13px; font-size: 12px; }
+.browse-sources { border-top: 1px solid #283b53; padding: 16px 24px; font-size: 11px; color: #b6cde4; }
+.browse-sources > strong { display: block; margin-bottom: 10px; }
+.browse-source-tags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 105px; overflow-y: auto; }
+.browse-source-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SFMono-Regular", Consolas, monospace; padding: 6px 8px; font-size: 10px; background: #183a50; border: 1px solid #32617f; border-radius: 6px; color: #c8e4f8; }

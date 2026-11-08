@@ -158,23 +158,38 @@
 @if (browseKind) {
   <div class="modal-backdrop folder-layer" (click)="browseKind = null">
     <div class="browser-modal" role="dialog" aria-modal="true" aria-label="Explorateur de dossiers" (click)="$event.stopPropagation()">
-      <div class="modal-header"><div><div class="eyebrow">EXPLORATEUR NAS</div><h2>Choisir un dossier {{ browseKind === 'source' ? 'source' : 'destination' }}</h2></div><button class="close-button" (click)="browseKind = null">✕</button></div>
-      <p class="browse-help">Parcourez les volumes accessibles au conteneur. Vous pouvez sélectionner directement un volume ou un de ses sous-dossiers.</p>
-      <div class="browser-path"><button class="small-button" (click)="listDirectories()">Volumes</button><button class="small-button" [disabled]="!browsePath" (click)="browseUp()">↑ Parent</button><code>{{ browsePath || 'Volumes montés dans Docker' }}</code></div>
+      <div class="modal-header">
+        <div><div class="eyebrow">EXPLORATEUR NAS</div><h2>{{ browseKind === 'source' ? 'Ajouter des dossiers sources' : 'Choisir la destination' }}</h2></div>
+        <button class="close-button" aria-label="Fermer l’explorateur" (click)="browseKind = null">✕</button>
+      </div>
+      <p class="browse-help">Cliquez sur un dossier pour <strong>l'ouvrir</strong>. Utilisez le bouton de validation en bas pour le sélectionner.</p>
+      <div class="browser-path">
+        <button class="small-button" (click)="listDirectories()" [disabled]="browseLoading">Volumes</button>
+        <button class="small-button" [disabled]="!browsePath || browseLoading" (click)="browseUp()">↑ Parent</button>
+        <code>{{ browsePath || 'Volumes montés dans Docker' }}</code>
+      </div>
       @if (browseError) { <div class="alert browse-alert" role="alert">{{ browseError }}</div> }
+      @if (browseNotice) { <div class="browse-notice" role="status">{{ browseNotice }}</div> }
       <div class="folder-list">
         @if (browseLoading) { <div class="empty-history">Chargement…</div> }
         @else {
           @for (directory of directories; track directory.path) {
-            <div class="folder-row">
-              <button class="folder folder-open" (click)="listDirectories(directory.path)" [title]="directory.path">
-                <span>▤</span><span>{{ directory.name }}</span><small>{{ directory.path }}</small><span>›</span>
-              </button>
-              <button class="small-button folder-select" (click)="chooseFolder(directory.path)">Choisir</button>
-            </div>
-          } @empty { <p class="empty-history">Aucun sous-dossier.</p> }
+            <button class="folder" (click)="listDirectories(directory.path)" [title]="'Ouvrir ' + directory.path">
+              <span>▤</span><span>{{ directory.name }}</span><small>{{ directory.path }}</small><span>›</span>
+            </button>
+          } @empty { <p class="empty-history">Aucun sous-dossier. Vous pouvez sélectionner le dossier courant.</p> }
         }
       </div>
+      @if (browseKind === 'source') {
+        <div class="browse-sources">
+          <strong>Sources sélectionnées ({{ selectedSourceCount() }}/30)</strong>
+          <div class="browse-source-tags">
+            @for (source of form.sources; track $index) {
+              @if (source.trim()) { <span class="browse-source-tag" [title]="source">{{ source }}</span> }
+            }
+          </div>
+        </div>
+      }
       @if (browseKind === 'destination' && browsePath) {
         <div class="folder-creation">
           <label class="field-label" for="new-folder-name">Créer un sous-dossier dans le répertoire courant</label>
@@ -184,7 +199,11 @@
           </div>
         </div>
       }
-      <div class="modal-footer"><button class="button secondary" (click)="browseKind = null">Annuler</button><button class="button primary" [disabled]="!browsePath" (click)="chooseFolder()">Utiliser le dossier courant</button></div>
+      <div class="modal-footer">
+        <button class="button secondary" (click)="browseKind = null">{{ browseKind === 'source' ? 'Terminer' : 'Annuler' }}</button>
+        <button class="button primary" [disabled]="!browsePath || browseLoading"
+          (click)="chooseFolder()">{{ browseKind === 'source' ? '＋ Ajouter le dossier courant' : 'Valider cette destination' }}</button>
+      </div>
     </div>
   </div>
 }

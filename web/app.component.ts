@@ -47,6 +47,8 @@ export class AppComponent implements OnInit, OnDestroy {
   directories: { path: string; name: string }[] = [];
   browseLoading = false;
   browseError = '';
+  browseNotice = '';
+  private browseRequestId = 0;
   browseNewFolderName = '';
   creatingFolder = false;
   formError = '';
@@ -171,6 +173,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.browseKind = kind;
     this.browseIndex = index;
     this.browseError = '';
+    this.browseNotice = '';
     this.browseNewFolderName = '';
     this.browsePath = null;
     // Start at the currently chosen path if it already exists, otherwise show mounts.
@@ -179,20 +182,25 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   listDirectories(directory?: string): void {
     if (!this.browseKind) return;
+    const requestId = ++this.browseRequestId;
     this.browseError = '';
+    this.browseNotice = '';
     this.browseLoading = true;
     const params: Record<string, string> = { kind: this.browseKind };
     if (directory) params['path'] = directory;
     this.http.get<{ directories: { path: string; name: string }[] }>('/api/browse', { params }).subscribe({
       next: data => {
+        if (requestId !== this.browseRequestId || !this.browseKind) return;
         this.directories = data.directories;
         this.browsePath = directory ?? null;
         this.browseLoading = false;
       },
       error: e => {
+        if (requestId !== this.browseRequestId || !this.browseKind) return;
         this.browseLoading = false;
         this.browseError = this.extractError(e);
-        if (directory) this.listDirectories();
+        // A failed directory load leaves the browser open with the previous location.
+        // The user can navigate upward or return to the mounted volumes.
       }
     });
   }
@@ -204,14 +212,38 @@ export class AppComponent implements OnInit, OnDestroy {
     // Returning to the list of authorized roots never traverses outside them.
     this.listDirectories(parent === '/' ? undefined : parent);
   }
-  chooseFolder(directory?: string): void {
-    const chosen = directory ?? this.browsePath;
-    if (!chosen) return;
-    if (this.browseKind === 'destination') this.form.destination = chosen;
-    else if (this.browseKind === 'source' && this.browseIndex >= 0) {
-      this.form.sources[this.browseIndex] = chosen;
+  selectedSourceCount(): number { return this.form.sources.filter(source => !!source.trim()).length; }
+  chooseFolder(): void {
+    const chosen = this.browsePath;
+    if (!chosen || this.browseLoading) return;
+
+    if (this.browseKind === 'destination') {
+      this.form.destination = chosen;
+      this.browseKind = null;
+      return;
     }
-    this.browseKind = null;
+
+    if (this.browseKind !== 'source') return;
+    // When replacing a source, keep its current index. Subsequent additions go
+    // into the first empty source slot or append a new source (max 30).
+    const index = this.browseIndex >= 0
+      ? this.browseIndex : this.form.sources.findIndex(x => !x.trim());
+    if (this.form.sources.some((x, i) => x === chosen && i !== index)) {
+      this.browseError = 'Ce dossier figure déjà parmi les sources de cette règle.';
+      return;
+    }
+    if (index >= 0) {
+      this.form.sources[index] = chosen;
+    } else if (this.form.sources.length < 30) {
+      this.form.sources.push(chosen);
+    } else {
+      this.browseError = 'Cette règle contient déjà 30 dossiers sources.';
+      return;
+    }
+    this.browseIndex = -1;
+    this.browseError = '';
+    this.browseNotice = 'Source ajoutée. Vous pouvez sélectionner un autre dossier ou terminer.';
+    // Keep the folder browser open while adding multiple sources.
   }
   createFolder(): void {
     if (!this.browsePath || this.browseKind !== 'destination' || this.creatingFolder) return;

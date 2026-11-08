@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Roots, RunProgress, SyncJob } from './models.js';
 import { destinationRootFor, ensureDestinationDirectory, isInside, validateJobPaths, ValidationError } from './security.js';
-import { matchesExtensions } from './extensions.js';
+import { compileFilenameRegex, matchesFileFilters } from './filters.js';
 import { PauseGate } from './pause.js';
 
 interface FileTask {
@@ -29,7 +29,7 @@ function aborted(signal: AbortSignal): void {
 
 async function* walk(
   directory: string, base: string, signal: AbortSignal, gate: PauseGate,
-  extensions: string[] | null | undefined, exclude: () => void
+  job: SyncJob, regex: RegExp | null, exclude: () => void
 ): AsyncGenerator<FileTask> {
   await gate.wait(signal);
   const handle = await opendir(directory);
@@ -39,11 +39,20 @@ async function* walk(
     if (entry.isSymbolicLink()) continue;
     const filename = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      yield* walk(filename, base, signal, gate, extensions, exclude);
+      yield* walk(filename, base, signal, gate, job, regex, exclude);
     } else if (entry.isFile()) {
-      if (!matchesExtensions(entry.name, extensions)) { exclude(); continue; }
+      // Cheap name checks before lstat; size check follows once the size is known.
+      if (job.extensions && !job.extensions.some(ext => entry.name.toLowerCase().endsWith('.' + ext))) {
+        exclude();
+        continue;
+      }
+      if (regex && !regex.test(entry.name)) { exclude(); continue; }
       const info = await lstat(filename);
       if (!info.isFile()) continue;
+      if (!matchesFileFilters(entry.name, info.size, job, regex)) {
+        exclude();
+        continue;
+      }
       yield {
         sourceRoot: base,
         sourcePath: filename,
@@ -170,9 +179,10 @@ export async function executeSync(
   try {
     await validateJobPaths(job, roots);
     const destinationRoot = await destinationRootFor(job.destination, roots);
+    const regex = compileFilenameRegex(job.filenameRegex, job.filenameRegexIgnoreCase ?? false);
     const tasks: FileTask[] = [];
     for (const source of job.sources) {
-      for await (const task of walk(source, source, signal, gate, job.extensions, () => {
+      for await (const task of walk(source, source, signal, gate, job, regex, () => {
         progress.excluded = (progress.excluded ?? 0) + 1;
       })) {
         tasks.push(task);

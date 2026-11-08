@@ -187,3 +187,47 @@ test('a paused sync can be cancelled without leaving copied files', async () => 
   assert.equal(progress.status, 'cancelled');
   await assert.rejects(readdir(destination), { code: 'ENOENT' });
 });
+
+
+test('size filter excludes files below or equal to the configured threshold', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.sizeFilter = { operator: 'gt', megabytes: 1 };
+  await put(first, 'small.txt', 'short');
+  await put(first, 'exact.txt', 'x'.repeat(1024 * 1024));
+  await put(first, 'large.txt', 'y'.repeat(1024 * 1024 + 1));
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.filesTotal, 1);
+  assert.equal(result.excluded, 2);
+  assert.deepEqual(await readdir(destination), ['large.txt']);
+});
+
+test('regex matches filename, not directory, and composes with other filters', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.extensions = ['jpg'];
+  job.sizeFilter = { operator: 'lt', megabytes: 0.001 };
+  job.filenameRegex = '^IMG_[0-9]{3}\\.jpg$';
+  job.filenameRegexIgnoreCase = true;
+  await put(first, 'an-unmatched-parent/IMG_001.JPG', 'A');
+  await put(first, 'an-unmatched-parent/IMG_002.jpg', 'B');
+  await put(first, 'an-unmatched-parent/document.pdf', 'C');
+  await put(first, 'an-unmatched-parent/IMG_other.jpg', 'D');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.copied, 2);
+  assert.equal(result.excluded, 2);
+  assert.deepEqual((await readdir(path.join(destination, 'an-unmatched-parent'))).sort(), ['IMG_001.JPG', 'IMG_002.jpg']);
+});
+
+test('dry-run applies size + regex filters without writing files', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.filenameRegex = '^archive_[0-9]+\\.txt$';
+  job.sizeFilter = { operator: 'gt', megabytes: 0 };
+  await put(first, 'archive_123.txt', 'ok');
+  await put(first, 'archive_old.txt', 'skipped');
+  const result = await run(true);
+  assert.equal(result.filesTotal, 1);
+  assert.equal(result.excluded, 1);
+  assert.equal(result.copied, 1);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});

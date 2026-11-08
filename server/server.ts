@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { browseDirectories, destinationRootFor, ensureDestinationDirectory, getRoots, validateJobPaths, ValidationError } from './security.js';
 import { executeSync, newProgress } from './engine.js';
 import { normalizeExtensions } from './extensions.js';
+import { normalizeFilenameRegex, normalizeFilenameRegexIgnoreCase, normalizeSizeFilter } from './filters.js';
 import { PauseGate } from './pause.js';
 import { Storage } from './storage.js';
 import type { CompareMode, ConflictPolicy, RunProgress, SyncJob } from './models.js';
@@ -97,6 +98,10 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
     conflictPolicy: conflict as ConflictPolicy,
     compareMode: compare as CompareMode,
     extensions: obj.extensions === undefined ? (old?.extensions ?? null) : normalizeExtensions(obj.extensions),
+    sizeFilter: obj.sizeFilter === undefined ? (old?.sizeFilter ?? null) : normalizeSizeFilter(obj.sizeFilter),
+    filenameRegex: obj.filenameRegex === undefined ? (old?.filenameRegex ?? null) : normalizeFilenameRegex(obj.filenameRegex),
+    filenameRegexIgnoreCase: obj.filenameRegexIgnoreCase === undefined
+      ? (old?.filenameRegexIgnoreCase ?? false) : normalizeFilenameRegexIgnoreCase(obj.filenameRegexIgnoreCase),
     cron: schedule || null,
     enabled: obj.enabled === undefined ? true : obj.enabled,
     createdAt: old?.createdAt ?? now,

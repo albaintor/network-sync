@@ -1,6 +1,11 @@
 export type ConflictPolicy = 'rename' | 'skip' | 'overwrite';
 export type CompareMode = 'size' | 'sha256';
 
+export interface SizeFilter {
+  operator: 'gt' | 'lt';
+  megabytes: number;
+}
+
 export interface SyncJob {
   id: string;
   name: string;
@@ -10,6 +15,11 @@ export interface SyncJob {
   compareMode: CompareMode;
   /** null/undefined = all files; non-empty list = allowed filename extensions. */
   extensions?: string[] | null;
+  /** Optional strict threshold (MiB), no filtering on older rules. */
+  sizeFilter?: SizeFilter | null;
+  /** JavaScript regular expression tested on the basename (not the path). */
+  filenameRegex?: string | null;
+  filenameRegexIgnoreCase?: boolean;
   cron: string | null;
   enabled: boolean;
   createdAt: string;
@@ -33,7 +43,7 @@ export interface RunProgress {
   bytesCopied: number;
   copied: number;
   skipped: number;
-  /** Files excluded by an extension filter during source scanning. */
+  /** Files excluded by any file filter during source scanning. */
   excluded?: number;
   renamed: number;
   overwritten: number;

@@ -3,6 +3,9 @@ services:
     # Build on the NAS: no GitHub Actions minutes or GHCR publication required.
     build:
       context: .
+      # DSM Docker bridge DNS can fail with EAI_AGAIN for registry.npmjs.org.
+      # Host networking applies only to build RUN steps, not the running app.
+      network: "${NETWORK_SYNC_BUILD_NETWORK:-host}"
     image: network-sync:local
     container_name: network-sync
     restart: unless-stopped

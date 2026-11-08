@@ -48,6 +48,22 @@ Exemple de lancement :
     sudo chown 1026:100 data  # Adapter au PUID:PGID réel
     docker compose up -d --build
 
+**DNS npm sur Synology :** la compilation utilise par défaut `build.network: host` (`NETWORK_SYNC_BUILD_NETWORK=host`) pour contourner les erreurs DNS Docker de type `EAI_AGAIN registry.npmjs.org`. Cela ne modifie pas le réseau du conteneur en fonctionnement. Si la résolution DNS échoue également sur le réseau hôte, corriger la configuration DNS du NAS : ce paramètre ne pourra pas la compenser.
+
+Diagnostic à lancer sur le NAS :
+```sh
+docker run --rm --network host node:22-alpine npm ping --registry=https://registry.npmjs.org
+docker run --rm node:22-alpine npm ping --registry=https://registry.npmjs.org
+```
+
+Pour relancer après un blocage (interrompre d'abord le build précédent avec Ctrl+C) :
+```sh
+cd /volume1/docker/network-sync
+git pull --ff-only
+docker compose build --progress plain network-sync
+docker compose up -d --no-build --force-recreate network-sync
+```
+
 **Sans budget GitHub Actions :** le fichier Compose construit désormais l'image `network-sync:local` **directement sur le NAS**. Les workflows GitHub ne sont plus déclenchés automatiquement par les commits ; ils ne peuvent être lancés que manuellement si le budget le permet.
 
 **Docker Manager :** sélectionner le projet `/volume1/docker/network-sync`, la branche `main`, le dépôt `https://github.com/albaintor/network-sync` et le mode **Build local : docker compose build** (`compose-build`). Puis lancer **Déployer** : le manager met à jour le dépôt et construit le conteneur sur le NAS. Ne pas laisser le projet en mode **Image préconstruite** pour cette version : l'image GHCR ne contient pas les derniers correctifs.

@@ -176,7 +176,9 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .shell { display: block; }
   .sidebar { width: 100%; min-height: unset; padding: 15px; }
   .identity { padding: 0 0 17px; }
-  .nav-title, .job-list, .sidebar-bottom { display: none; }
+  .nav-title, .sidebar-bottom { display: none; }
+  .job-list { display: flex; flex-direction: row; flex: 0 0 auto; gap: 8px; overflow-x: auto; padding-bottom: 9px; }
+  .job-link { flex: 0 0 195px; padding: 10px; }
   .new-job { width: auto; margin-top: 4px; }
   .topbar { height: 55px; padding: 0 18px; }
   .content { padding: 26px 16px; }

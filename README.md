@@ -49,7 +49,7 @@ Exemple de lancement :
     docker compose pull
     docker compose up -d
 
-L'image est publiée sur `ghcr.io/albaintor/network-sync:latest` (AMD64 et ARM64) à chaque validation du workflow CI sur `main`. Pour compiler localement à la place : remplacer `image` / `pull_policy` par `build: .`, puis exécuter `docker compose up -d --build`.
+L'image est publiée sur `ghcr.io/albaintor/network-sync:latest` (AMD64 et ARM64) à chaque validation du workflow CI sur `main`. Si le paquet GHCR n'est pas visible publiquement, régler sa visibilité sur **Public** dans GitHub Packages ou authentifier Docker Manager auprès de GHCR. Pour compiler localement à la place : remplacer `image` / `pull_policy` par `build: .`, puis exécuter `docker compose up -d --build`.
 
 ### Montages et chemins
 

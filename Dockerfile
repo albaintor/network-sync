@@ -8,6 +8,8 @@ COPY web ./web
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-alpine
+LABEL org.opencontainers.image.source="https://github.com/albaintor/network-sync" \
+      org.opencontainers.image.description="Multi-source NAS folder sync with Angular UI"
 ENV NODE_ENV=production PORT=8080 DATA_DIR=/app/data
 WORKDIR /app
 COPY --from=build /app/package*.json ./

@@ -243,12 +243,12 @@
           <div class="file-filter-section">
             <label class="field-label" for="filename-regex">Expression régulière sur le nom du fichier (facultatif)</label>
             <input id="filename-regex" class="field mono" [(ngModel)]="form.filenameRegex"
-              maxlength="200" spellcheck="false" placeholder="Ex. ^IMG_[0-9]+\\.(jpg|heic)$">
+              maxlength="200" spellcheck="false" placeholder="Ex. ^IMG_[0-9]+\.(jpg|heic)$">
             <label class="checkbox">
               <input type="checkbox" [(ngModel)]="form.filenameRegexIgnoreCase">
               Ignorer les majuscules/minuscules
             </label>
-            <p class="helper">Regex JavaScript sur le nom seul, extension comprise, sans chemin de dossier. Exemple : <code>^IMG_[0-9]+\\.(jpg|heic)$</code>. Les expressions coûteuses (groupes répétés, lookarounds et références arrière) sont refusées.</p>
+            <p class="helper">Regex JavaScript sur le nom seul, extension comprise, sans chemin de dossier. Exemple : <code>^IMG_[0-9]+\.(jpg|heic)$</code>. Les expressions coûteuses (groupes répétés, lookarounds et références arrière) sont refusées.</p>
           </div>
           <p class="helper">Les filtres d’extension, de taille et de nom se cumulent : un fichier doit respecter tous les critères pour être copié.</p>
         </div>

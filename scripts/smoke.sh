@@ -83,4 +83,32 @@ INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
   -d '{"name":"Bad extension","sources":["/volume1/OneDrive/OneDrive 1/Photos"],"destination":"/volumeUSB1/usbshare/Other","extensions":[]}' \
   -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs)
 [[ "$INVALID" == 400 ]] || { echo "Expected invalid extension filter to fail: $INVALID" >&2; exit 1; }
-echo 'Docker smoke test passed (auth, API, multiple sources, conflict rename, extension filter, persistence).'
+
+# A second rule combines strict size and a regex on the basename.
+RESPONSE=$(curl -fsS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"Filtered","sources":["/volume1/OneDrive/OneDrive 1/Photos","/volume1/OneDrive/OneDrive 2/Photos"],"destination":"/volumeUSB1/usbshare/Filtered","sizeFilter":{"operator":"gt","megabytes":0.000005},"filenameRegex":"^photo\\.jpg$"}' \
+  http://127.0.0.1:18080/api/jobs)
+FILTERED_ID=$(node -p 'JSON.parse(process.argv[1]).job.id' "$RESPONSE")
+curl -fsS -u "$AUTH" -H 'Content-Type: application/json' -d '{"dryRun":false}' \
+  "http://127.0.0.1:18080/api/jobs/$FILTERED_ID/run" >/dev/null
+FINISHED=0
+for _ in $(seq 1 40); do
+  STATUS=$(curl -fsS -u "$AUTH" http://127.0.0.1:18080/api/status)
+  if [[ "$STATUS" == *'"active":null'* ]]; then FINISHED=1; break; fi
+  sleep 1
+done
+[[ "$FINISHED" == 1 ]] || { echo 'Filtered sync timeout' >&2; exit 1; }
+[[ "$(cat "$WORK/destination/Filtered/2026/01/photo.jpg")" == 'BBBBBBBB' ]] || {
+  echo 'Size and regex filters did not select the expected file' >&2; exit 1;
+}
+FILTERED_RUNS=$(curl -fsS -u "$AUTH" "http://127.0.0.1:18080/api/jobs/$FILTERED_ID/runs")
+[[ "$FILTERED_RUNS" == *'"excluded":2'* ]] || { echo "Expected 2 excluded files: $FILTERED_RUNS" >&2; exit 1; }
+INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"Invalid","sources":["/volume1/OneDrive/OneDrive 1/Photos"],"destination":"/volumeUSB1/usbshare/Invalid","sizeFilter":{"operator":"gte","megabytes":1}}' \
+  -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs)
+[[ "$INVALID" == 400 ]] || { echo "Expected invalid size filter 400, got $INVALID" >&2; exit 1; }
+INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"Invalid regex","sources":["/volume1/OneDrive/OneDrive 1/Photos"],"destination":"/volumeUSB1/usbshare/InvalidRegex","filenameRegex":"(a+)+$"}' \
+  -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs)
+[[ "$INVALID" == 400 ]] || { echo "Expected invalid regex 400, got $INVALID" >&2; exit 1; }
+echo 'Docker smoke test passed (auth, API, conflicts, extension/size/regex filters, persistence).'

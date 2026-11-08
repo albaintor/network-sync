@@ -4,6 +4,9 @@ Network Sync est une application de synchronisation **unidirectionnelle et non d
 
 ## Fonctionnalités
 
+**Compatibilité volumes USB Synology :** la publication d'une copie utilise un lien physique pour éviter l'écrasement accidentel sur les systèmes de fichiers compatibles. Si le périphérique USB refuse les liens physiques (par exemple `EPERM` sur `link`, fréquent avec exFAT/FAT), Network Sync utilise automatiquement une copie exclusive (`COPYFILE_EXCL`) qui refuse tout nom déjà présent. Cette solution effectue une deuxième copie sur le disque USB et le fichier final peut être brièvement visible avant la fin de la publication ; les fichiers préexistants ne sont jamais écrasés par ce mode. Les dossiers internes `@eaDir` et `#recycle` ne sont pas parcourus.
+
+
 - Plusieurs tâches indépendantes, chacune avec 1 à 30 dossiers sources et une destination.
 - Conservation de l'arborescence **relative à chaque dossier source**.
 - Conflits paramétrables : **renommer** (par défaut), **ignorer**, **écraser**.

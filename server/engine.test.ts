@@ -231,3 +231,16 @@ test('dry-run applies size + regex filters without writing files', async () => {
   assert.equal(result.copied, 1);
   await assert.rejects(readdir(destination), { code: 'ENOENT' });
 });
+
+test('skips Synology @eaDir metadata and recycle folders even when syncing all extensions', async () => {
+  const { first, destination, put, run } = await setup();
+  await put(first, 'archive/holiday.mp4', 'real video');
+  await put(first, 'archive/@eaDir/holiday.mp4@SynoEAStream', 'metadata');
+  await put(first, 'archive/#recycle/deleted.mp4', 'deleted video');
+  await put(first, 'archive/@eaDir/nested/thumbnail.jpg', 'metadata');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.copied, 1);
+  assert.equal(result.filesTotal, 1);
+  assert.deepEqual(await readdir(path.join(destination, 'archive')), ['holiday.mp4']);
+});

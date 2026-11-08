@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
-import { lstat, link, opendir, rename, rm, stat, utimes, realpath } from 'node:fs/promises';
+import { lstat, opendir, rename, rm, utimes, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Roots, RunProgress, SyncJob } from './models.js';
 import { destinationRootFor, ensureDestinationDirectory, isInside, validateJobPaths, ValidationError } from './security.js';
 import { compileFilenameRegex, matchesFileFilters } from './filters.js';
 import { PauseGate } from './pause.js';
+import { publishWithoutOverwrite } from './publish.js';
 
 interface FileTask {
   sourceRoot: string;
@@ -39,6 +40,9 @@ async function* walk(
     if (entry.isSymbolicLink()) continue;
     const filename = path.join(directory, entry.name);
     if (entry.isDirectory()) {
+      // Synology bookkeeping is not user media; do not scan/copy @eaDir thumbnails
+      // or recycle bin contents, even when no extension filter is configured.
+      if (entry.name.toLowerCase() === '@eadir' || entry.name.toLowerCase() === '#recycle') continue;
       yield* walk(filename, base, signal, gate, job, regex, exclude);
     } else if (entry.isFile()) {
       // Cheap name checks before lstat; size check follows once the size is known.
@@ -94,8 +98,9 @@ async function occupantAt(filename: string, planned: Map<string, FileTask>): Pro
   }
 }
 
-// Copy to a sibling temp file and publish atomically. Never overwrite when a
-// rename/normal copy was intended. A failed or cancelled copy leaves no partial target.
+// Write to a sibling temp file, then publish without clobbering existing names.
+// The hard-link fast path is atomic. On USB filesystems that reject links,
+// an exclusive second copy is used, which can be briefly visible before completion.
 async function copyAtomic(task: FileTask, target: string, overwrite: boolean, signal: AbortSignal, gate: PauseGate): Promise<void> {
   const temp = path.join(path.dirname(target), '.network-sync-' + randomUUID() + '.tmp');
   try {
@@ -132,14 +137,16 @@ async function copyAtomic(task: FileTask, target: string, overwrite: boolean, si
     if (overwrite) {
       // The user explicitly selected overwrite; still refuse symlinks.
       const current = await occupantAt(target, new Map());
-      if (current === null) {
-        await link(temp, target);
-      } else {
+      if (current !== null) {
         await rename(temp, target);
         return;
       }
-    } else {
-      await link(temp, target); // EEXIST protects an unexpectedly created target.
+    }
+    const mode = await publishWithoutOverwrite(temp, target);
+    if (mode === 'copied') {
+      // Hard links carry the temporary file's metadata automatically; a
+      // copyFile fallback needs a separate best-effort timestamp update.
+      await utimes(target, before.atime, before.mtime).catch(() => {});
     }
   } finally {
     await rm(temp, { force: true }).catch(() => {});

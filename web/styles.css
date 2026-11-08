@@ -20,9 +20,8 @@ code { overflow-wrap: anywhere; }
 }
 .identity { display: flex; align-items: center; gap: 13px; padding: 0 9px 48px; }
 .brand-icon {
-  width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
-  background: linear-gradient(135deg, #377bff, #28c6c1); color: white; font-size: 27px;
-  box-shadow: 0 8px 28px #2563eb34;
+  width: 42px; height: 42px; border-radius: 13px; display: block;
+  box-shadow: 0 8px 28px #2563eb34; flex-shrink: 0;
 }
 .identity strong { display: block; font-size: 12px; letter-spacing: .16em; font-weight: 800; }
 .identity small { display: block; margin-top: 5px; color: #778aa7; font-size: 9px; letter-spacing: .14em; }
@@ -218,3 +217,16 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
 .browse-sources > strong { display: block; margin-bottom: 10px; }
 .browse-source-tags { display: flex; flex-wrap: wrap; gap: 6px; max-height: 105px; overflow-y: auto; }
 .browse-source-tag { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: "SFMono-Regular", Consolas, monospace; padding: 6px 8px; font-size: 10px; background: #183a50; border: 1px solid #32617f; border-radius: 6px; color: #c8e4f8; }
+
+/* Row actions remain visible without having to open or close the folder picker. */
+.folder-row { min-width: 0; }
+.folder-row .folder-open { overflow: hidden; }
+.folder-row .folder-open > span:nth-child(2) { flex: 0 1 auto; max-width: 45%; }
+.folder-row .folder-open .folder-chevron { margin-left: 2px; }
+.folder-row .folder-select { white-space: nowrap; }
+.folder-added { flex-shrink: 0; color: #80dbc3; font-size: 11px; margin: auto 18px; }
+@media (max-width: 520px) {
+  .folder-row .folder-open small { display: none; }
+  .folder-row .folder-open > span:nth-child(2) { max-width: none; }
+  .folder-row .folder-select { padding: 0 9px; }
+}

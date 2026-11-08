@@ -213,9 +213,14 @@ export class AppComponent implements OnInit, OnDestroy {
     this.listDirectories(parent === '/' ? undefined : parent);
   }
   selectedSourceCount(): number { return this.form.sources.filter(source => !!source.trim()).length; }
-  chooseFolder(): void {
-    const chosen = this.browsePath;
-    if (!chosen || this.browseLoading) return;
+  /**
+   * Explicitly select a directory. Navigation calls listDirectories() and must
+   * never call this method. This separation prevents a folder click from
+   * unexpectedly closing the browser or confirming the wrong directory.
+   */
+  chooseFolder(directory?: string): void {
+    const chosen = directory ?? this.browsePath;
+    if (!chosen || (this.browseLoading && !directory)) return;
 
     if (this.browseKind === 'destination') {
       this.form.destination = chosen;
@@ -224,8 +229,6 @@ export class AppComponent implements OnInit, OnDestroy {
     }
 
     if (this.browseKind !== 'source') return;
-    // When replacing a source, keep its current index. Subsequent additions go
-    // into the first empty source slot or append a new source (max 30).
     const index = this.browseIndex >= 0
       ? this.browseIndex : this.form.sources.findIndex(x => !x.trim());
     if (this.form.sources.some((x, i) => x === chosen && i !== index)) {
@@ -242,8 +245,8 @@ export class AppComponent implements OnInit, OnDestroy {
     }
     this.browseIndex = -1;
     this.browseError = '';
-    this.browseNotice = 'Source ajoutée. Vous pouvez sélectionner un autre dossier ou terminer.';
-    // Keep the folder browser open while adding multiple sources.
+    this.browseNotice = 'Source ajoutée : ' + chosen;
+    // Source picker remains open so another folder can be added immediately.
   }
   createFolder(): void {
     if (!this.browsePath || this.browseKind !== 'destination' || this.creatingFolder) return;

@@ -1,8 +1,13 @@
 name: Build and test
+# Explicit opt-in only: do not spend GitHub Actions minutes on every commit.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Also publish a multi-architecture GHCR image"
+        required: false
+        type: boolean
+        default: false
 concurrency:
   group: network-sync-${{ github.ref }}
   cancel-in-progress: true
@@ -24,7 +29,7 @@ jobs:
       - run: bash scripts/smoke.sh
 
   publish:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && inputs.publish == true
     needs: build
     runs-on: ubuntu-latest
     steps:

@@ -1,7 +1,9 @@
 services:
   network-sync:
-    image: ghcr.io/albaintor/network-sync:latest
-    pull_policy: always
+    # Build on the NAS: no GitHub Actions minutes or GHCR publication required.
+    build:
+      context: .
+    image: network-sync:local
     container_name: network-sync
     restart: unless-stopped
     init: true

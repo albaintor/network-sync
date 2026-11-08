@@ -17,7 +17,7 @@
             "browser": "web/main.ts",
             "tsConfig": "tsconfig.web.json",
             "styles": ["web/styles.css"],
-            "assets": []
+            "assets": [{"glob": "**/*", "input": "web/assets", "output": "/"}]
           },
           "configurations": {
             "production": {

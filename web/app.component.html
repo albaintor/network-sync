@@ -1,7 +1,7 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="identity">
-      <span class="brand-icon">⇄</span>
+      <img class="brand-icon" src="/network-sync.svg" alt="" width="42" height="42">
       <div><strong>NETWORK SYNC</strong><small>NAS FILE AUTOMATION</small></div>
     </div>
     <div class="nav-title"><span>SYNCHRONISATIONS</span><span class="count">{{ jobs.length }}</span></div>
@@ -156,13 +156,13 @@
 }
 
 @if (browseKind) {
-  <div class="modal-backdrop folder-layer" (click)="browseKind = null">
+  <div class="modal-backdrop folder-layer">
     <div class="browser-modal" role="dialog" aria-modal="true" aria-label="Explorateur de dossiers" (click)="$event.stopPropagation()">
       <div class="modal-header">
         <div><div class="eyebrow">EXPLORATEUR NAS</div><h2>{{ browseKind === 'source' ? 'Ajouter des dossiers sources' : 'Choisir la destination' }}</h2></div>
         <button class="close-button" aria-label="Fermer l’explorateur" (click)="browseKind = null">✕</button>
       </div>
-      <p class="browse-help">Cliquez sur un dossier pour <strong>l'ouvrir</strong>. Utilisez le bouton de validation en bas pour le sélectionner.</p>
+      <p class="browse-help">Cliquez sur <strong>Ouvrir</strong> pour parcourir un sous-dossier ou sur <strong>Ajouter</strong> pour l'utiliser directement comme source. La navigation ne ferme jamais l'explorateur.</p>
       <div class="browser-path">
         <button class="small-button" (click)="listDirectories()" [disabled]="browseLoading">Volumes</button>
         <button class="small-button" [disabled]="!browsePath || browseLoading" (click)="browseUp()">↑ Parent</button>
@@ -174,9 +174,19 @@
         @if (browseLoading) { <div class="empty-history">Chargement…</div> }
         @else {
           @for (directory of directories; track directory.path) {
-            <button class="folder" (click)="listDirectories(directory.path)" [title]="'Ouvrir ' + directory.path">
-              <span>▤</span><span>{{ directory.name }}</span><small>{{ directory.path }}</small><span>›</span>
-            </button>
+            <div class="folder-row">
+              <button type="button" class="folder folder-open" (click)="listDirectories(directory.path)"
+                [title]="'Ouvrir ' + directory.path" [attr.aria-label]="'Ouvrir le sous-dossier ' + directory.name">
+                <span>▤</span><span>{{ directory.name }}</span><small>{{ directory.path }}</small><span class="folder-chevron">›</span>
+              </button>
+              @if (browseKind === 'source' && form.sources.includes(directory.path)) {
+                <span class="folder-added">Ajouté</span>
+              } @else {
+                <button type="button" class="small-button folder-select" (click)="chooseFolder(directory.path)">
+                  {{ browseKind === 'source' ? '＋ Ajouter' : 'Choisir' }}
+                </button>
+              }
+            </div>
           } @empty { <p class="empty-history">Aucun sous-dossier. Vous pouvez sélectionner le dossier courant.</p> }
         }
       </div>
@@ -200,8 +210,8 @@
         </div>
       }
       <div class="modal-footer">
-        <button class="button secondary" (click)="browseKind = null">{{ browseKind === 'source' ? 'Terminer' : 'Annuler' }}</button>
-        <button class="button primary" [disabled]="!browsePath || browseLoading"
+        <button type="button" class="button secondary" (click)="browseKind = null">{{ browseKind === 'source' ? 'Terminer' : 'Annuler' }}</button>
+        <button type="button" class="button primary" [disabled]="!browsePath || browseLoading"
           (click)="chooseFolder()">{{ browseKind === 'source' ? '＋ Ajouter le dossier courant' : 'Valider cette destination' }}</button>
       </div>
     </div>

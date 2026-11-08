@@ -46,10 +46,11 @@ Exemple de lancement :
     # Modifier .env, puis :
     mkdir -p data
     sudo chown 1026:100 data  # Adapter au PUID:PGID réel
-    docker compose pull
-    docker compose up -d
+    docker compose up -d --build
 
-L'image est publiée sur `ghcr.io/albaintor/network-sync:latest` (AMD64 et ARM64) à chaque validation du workflow CI sur `main`. Si le paquet GHCR n'est pas visible publiquement, régler sa visibilité sur **Public** dans GitHub Packages ou authentifier Docker Manager auprès de GHCR. Pour compiler localement à la place : remplacer `image` / `pull_policy` par `build: .`, puis exécuter `docker compose up -d --build`.
+**Sans budget GitHub Actions :** le fichier Compose construit désormais l'image `network-sync:local` **directement sur le NAS**. Les workflows GitHub ne sont plus déclenchés automatiquement par les commits ; ils ne peuvent être lancés que manuellement si le budget le permet.
+
+**Docker Manager :** sélectionner le projet `/volume1/docker/network-sync`, la branche `main`, le dépôt `https://github.com/albaintor/network-sync` et le mode **Build local : docker compose build** (`compose-build`). Puis lancer **Déployer** : le manager met à jour le dépôt et construit le conteneur sur le NAS. Ne pas laisser le projet en mode **Image préconstruite** pour cette version : l'image GHCR ne contient pas les derniers correctifs.
 
 ### Montages et chemins
 
@@ -61,7 +62,7 @@ Le Compose d'exemple fournit :
 | `/volumeUSB1` | `/volumeUSB1` | Lecture/écriture |
 | `./data` | `/app/data` | Lecture/écriture (configuration et historique) |
 
-Ainsi les chemins indiqués dans l'interface sont les chemins Synology exacts. **Les montages sont des zones accessibles, pas des synchronisations déjà configurées**. Au premier lancement, aucune règle n'est créée. Dans l'interface : **Nouvelle synchronisation** → saisir un nom → **Parcourir** pour explorer les sous-dossiers (un clic ouvre le dossier, il ne valide pas la sélection) → **Ajouter le dossier courant** pour enregistrer une source et continuer à parcourir, puis **Terminer** → **Parcourir** pour choisir la destination (ou créer un sous-dossier) → définir les conflits et la planification → **Enregistrer**. On peut modifier ou supprimer chaque règle ultérieurement.
+Ainsi les chemins indiqués dans l'interface sont les chemins Synology exacts. **Les montages sont des zones accessibles, pas des synchronisations déjà configurées**. Au premier lancement, aucune règle n'est créée. Dans l'interface : **Nouvelle synchronisation** → saisir un nom → **Parcourir** pour explorer les sous-dossiers (un clic ouvre le dossier, il ne valide pas la sélection) → **Ajouter** directement sur la ligne d'un dossier pour l'enregistrer comme source (sans fermer l'explorateur), puis **Terminer** → **Parcourir** pour choisir la destination (ou créer un sous-dossier) → définir les conflits et la planification → **Enregistrer**. On peut modifier ou supprimer chaque règle ultérieurement.
 
 Les volumes accessibles se déclarent **une fois dans Docker** (par défaut `/volume1` et `/volumeUSB1`) : leur contenu se parcourt depuis l'IHM sans renseigner de chemin dans le Compose par synchronisation. Pour ajouter un autre volume, le monter dans Docker et ajouter son chemin dans `SYNC_MOUNT_ROOTS` (séparateur `;`). Le volume doit être accessible en lecture pour les sources et en écriture pour les destinations ; le processus utilisateur du conteneur doit avoir les droits Synology correspondants. Les deux montages de l'exemple sont en lecture/écriture car chaque volume peut servir de destination. **Restreindre les montages à des répertoires dédiés si cet accès est trop large.** Un chemin hors de ces volumes est refusé, tout comme une destination imbriquée dans une source (ou inversement).
 

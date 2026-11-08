@@ -1,0 +1,28 @@
+services:
+  network-sync:
+    build: .
+    image: network-sync:local
+    container_name: network-sync
+    restart: unless-stopped
+    init: true
+    user: "\${PUID:-1026}:\${PGID:-100}"
+    ports:
+      - "\${PORT:-8088}:8080"
+    environment:
+      TZ: "\${TZ:-Europe/Paris}"
+      APP_USERNAME: "\${APP_USERNAME:?Set APP_USERNAME in .env}"
+      APP_PASSWORD: "\${APP_PASSWORD:?Set APP_PASSWORD in .env}"
+      DATA_DIR: /app/data
+      SYNC_SOURCE_ROOTS: /volume1/OneDrive
+      SYNC_DEST_ROOTS: /volumeUSB1/usbshare
+    volumes:
+      - ./data:/app/data
+      - /volume1/OneDrive:/volume1/OneDrive:ro
+      - /volumeUSB1/usbshare:/volumeUSB1/usbshare:rw
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m

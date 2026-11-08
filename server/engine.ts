@@ -1,10 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
+import { Transform } from 'node:stream';
 import { lstat, link, opendir, rename, rm, stat, utimes, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Roots, RunProgress, SyncJob } from './models.js';
 import { destinationRootFor, ensureDestinationDirectory, isInside, validateJobPaths, ValidationError } from './security.js';
+import { matchesExtensions } from './extensions.js';
+import { PauseGate } from './pause.js';
 
 interface FileTask {
   sourceRoot: string;
@@ -24,17 +27,21 @@ function aborted(signal: AbortSignal): void {
   if (signal.aborted) throw new Error('Synchronisation annulée.');
 }
 
-async function* walk(directory: string, base: string, signal: AbortSignal): AsyncGenerator<FileTask> {
-  aborted(signal);
+async function* walk(
+  directory: string, base: string, signal: AbortSignal, gate: PauseGate,
+  extensions: string[] | null | undefined, exclude: () => void
+): AsyncGenerator<FileTask> {
+  await gate.wait(signal);
   const handle = await opendir(directory);
   for await (const entry of handle) {
-    aborted(signal);
+    await gate.wait(signal);
     // Never follow symlinks, whether they point to a file or directory.
     if (entry.isSymbolicLink()) continue;
     const filename = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      yield* walk(filename, base, signal);
+      yield* walk(filename, base, signal, gate, extensions, exclude);
     } else if (entry.isFile()) {
+      if (!matchesExtensions(entry.name, extensions)) { exclude(); continue; }
       const info = await lstat(filename);
       if (!info.isFile()) continue;
       yield {
@@ -80,7 +87,7 @@ async function occupantAt(filename: string, planned: Map<string, FileTask>): Pro
 
 // Copy to a sibling temp file and publish atomically. Never overwrite when a
 // rename/normal copy was intended. A failed or cancelled copy leaves no partial target.
-async function copyAtomic(task: FileTask, target: string, overwrite: boolean, signal: AbortSignal): Promise<void> {
+async function copyAtomic(task: FileTask, target: string, overwrite: boolean, signal: AbortSignal, gate: PauseGate): Promise<void> {
   const temp = path.join(path.dirname(target), '.network-sync-' + randomUUID() + '.tmp');
   try {
     aborted(signal);
@@ -90,7 +97,23 @@ async function copyAtomic(task: FileTask, target: string, overwrite: boolean, si
     }
     const before = await lstat(task.sourcePath);
     if (!before.isFile()) throw new ValidationError('Source non régulière : ' + task.sourcePath);
-    await pipeline(createReadStream(task.sourcePath), createWriteStream(temp, { flags: 'wx', mode: 0o644 }), { signal });
+    // Pause between stream chunks, including during long video copies.
+    // The temp file stays open and is cleaned up if cancelled while paused.
+    const pauseStream = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        void gate.wait(signal).then(
+          () => callback(null, chunk),
+          error => callback(error instanceof Error ? error : new Error(String(error)))
+        );
+      }
+    });
+    await pipeline(
+      createReadStream(task.sourcePath),
+      pauseStream,
+      createWriteStream(temp, { flags: 'wx', mode: 0o644 }),
+      { signal }
+    );
+    await gate.wait(signal);
     const after = await lstat(task.sourcePath);
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
       throw new Error('Le fichier source a été modifié pendant sa copie.');
@@ -126,7 +149,7 @@ export function newProgress(job: SyncJob, dryRun: boolean): RunProgress {
     id: randomUUID(), jobId: job.id, jobName: job.name, dryRun,
     status: 'running', phase: 'scanning', startedAt: new Date().toISOString(),
     filesTotal: 0, bytesTotal: 0, processed: 0, bytesCopied: 0,
-    copied: 0, skipped: 0, renamed: 0, overwritten: 0, errors: 0,
+    copied: 0, skipped: 0, excluded: 0, renamed: 0, overwritten: 0, errors: 0,
     errorMessages: [], currentFile: null
   };
 }
@@ -141,14 +164,17 @@ export async function executeSync(
   progress: RunProgress,
   roots: Roots,
   signal: AbortSignal,
-  onUpdate: () => void = () => {}
+  onUpdate: () => void = () => {},
+  gate: PauseGate = new PauseGate()
 ): Promise<void> {
   try {
     await validateJobPaths(job, roots);
     const destinationRoot = await destinationRootFor(job.destination, roots);
     const tasks: FileTask[] = [];
     for (const source of job.sources) {
-      for await (const task of walk(source, source, signal)) {
+      for await (const task of walk(source, source, signal, gate, job.extensions, () => {
+        progress.excluded = (progress.excluded ?? 0) + 1;
+      })) {
         tasks.push(task);
         progress.filesTotal++;
         progress.bytesTotal += task.size;
@@ -160,7 +186,7 @@ export async function executeSync(
     onUpdate();
     const planned = new Map<string, FileTask>();
     for (const task of tasks) {
-      aborted(signal);
+      await gate.wait(signal);
       progress.currentFile = task.sourcePath;
       try {
         const original = path.join(job.destination, task.relativePath);
@@ -205,7 +231,7 @@ export async function executeSync(
           progress.skipped++;
         } else {
           await ensureDestinationDirectory(destinationRoot, path.dirname(target), !progress.dryRun);
-          if (!progress.dryRun) await copyAtomic(task, target, action === 'overwrite', signal);
+          if (!progress.dryRun) await copyAtomic(task, target, action === 'overwrite', signal, gate);
           else planned.set(target, task);
           progress.copied++;
           if (action === 'rename') progress.renamed++;

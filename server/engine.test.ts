@@ -103,3 +103,81 @@ test('symlink under destination cannot redirect writes outside allowed tree', as
   assert.equal(progress.errors, 1);
   assert.deepEqual(await readdir(escaped), []);
 });
+
+test('extension filter includes only matching files and preserves nested paths', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.extensions = ['jpg', 'heic', 'mp4'];
+  await put(first, '2026/one.JPG', 'picture');
+  await put(first, '2026/two.HEIC', 'heic');
+  await put(first, '2026/three.Mp4', 'video');
+  await put(first, '2026/four.pdf', 'document');
+  await put(first, '2026/noext', 'excluded');
+  const progress = await run();
+  assert.equal(progress.status, 'completed');
+  assert.equal(progress.filesTotal, 3);
+  assert.equal(progress.copied, 3);
+  assert.equal(progress.excluded, 2);
+  assert.deepEqual((await readdir(path.join(destination, '2026'))).sort(), ['one.JPG', 'three.Mp4', 'two.HEIC']);
+});
+
+test('extension filter applies to dry runs without creating a destination', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.extensions = ['txt'];
+  await put(first, 'keep.txt', 'hello');
+  await put(first, 'ignore.mkv', 'video');
+  const progress = await run(true);
+  assert.equal(progress.filesTotal, 1);
+  assert.equal(progress.copied, 1);
+  assert.equal(progress.excluded, 1);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});
+
+test('existing jobs without an extension filter still sync all files', async () => {
+  const { first, job, put, run } = await setup();
+  delete job.extensions;
+  await put(first, 'document.pdf', 'PDF');
+  await put(first, 'movie.mkv', 'VIDEO');
+  const progress = await run();
+  assert.equal(progress.copied, 2);
+  assert.equal(progress.excluded, 0);
+});
+
+test('a paused sync does not write and resumes from the pending file', async () => {
+  const { first, roots, job, destination, put } = await setup();
+  const { PauseGate } = await import('./pause.js');
+  const gate = new PauseGate();
+  await put(first, 'long.mov', 'video');
+  const progress = newProgress(job, false);
+  let paused = false;
+  const promise = executeSync(job, progress, roots, new AbortController().signal, () => {
+    if (progress.phase === 'copying' && !paused) { paused = true; gate.pause(); }
+  }, gate);
+  // The synchronous update fires before the first copy, so the pause gate
+  // prevents output even if the job has no other files.
+  while (!paused) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(gate.isPaused, true);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+  gate.resume();
+  await promise;
+  assert.equal(progress.status, 'completed');
+  assert.equal(progress.copied, 1);
+  assert.equal(await readFile(path.join(destination, 'long.mov'), 'utf8'), 'video');
+});
+
+test('a paused sync can be cancelled without leaving copied files', async () => {
+  const { first, roots, job, destination, put } = await setup();
+  const { PauseGate } = await import('./pause.js');
+  const gate = new PauseGate();
+  const controller = new AbortController();
+  await put(first, 'paused.avi', 'video');
+  const progress = newProgress(job, false);
+  let paused = false;
+  const promise = executeSync(job, progress, roots, controller.signal, () => {
+    if (progress.phase === 'copying' && !paused) { paused = true; gate.pause(); }
+  }, gate);
+  while (!paused) await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  await promise;
+  assert.equal(progress.status, 'cancelled');
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});

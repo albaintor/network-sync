@@ -8,13 +8,15 @@ export interface SyncJob {
   destination: string;
   conflictPolicy: ConflictPolicy;
   compareMode: CompareMode;
+  /** null/undefined = all files; non-empty list = allowed filename extensions. */
+  extensions?: string[] | null;
   cron: string | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-export type RunStatus = 'running' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
+export type RunStatus = 'running' | 'paused' | 'completed' | 'completed_with_errors' | 'failed' | 'cancelled';
 
 export interface RunProgress {
   id: string;
@@ -31,6 +33,8 @@ export interface RunProgress {
   bytesCopied: number;
   copied: number;
   skipped: number;
+  /** Files excluded by an extension filter during source scanning. */
+  excluded?: number;
   renamed: number;
   overwritten: number;
   errors: number;

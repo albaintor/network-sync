@@ -11,6 +11,8 @@ Network Sync est une application de synchronisation **unidirectionnelle et non d
 - Renommage stable, par exemple `photo__0a6c2d8e13.jpg` : une exécution répétée ne produit pas de copies supplémentaires si le contenu n'a pas changé.
 - Exécution manuelle, simulation sans écriture, annulation, progression et historique des 30 dernières exécutions.
 - Planification cron facultative avec fuseau horaire (par défaut `Europe/Paris`).
+- Filtrage facultatif par extensions, avec présélections **images**, **vidéos**, **documents**, sélection individuelle et extensions personnalisées.
+- **Pause / reprise** des synchronisations et simulations actives : l'exploration est suspendue et la copie peut être suspendue entre les blocs de données, sans abandonner le fichier temporaire.
 - Explorateur des répertoires autorisés, interface responsive, authentification HTTP Basic.
 - **Aucune suppression** dans la destination ou les sources. Liens symboliques ignorés dans les sources, refusés dans les chemins de destination.
 
@@ -104,6 +106,14 @@ Ainsi les chemins indiqués dans l'interface sont les chemins Synology exacts. *
 
 Les volumes accessibles se déclarent **une fois dans Docker** (par défaut `/volume1` et `/volumeUSB1`) : leur contenu se parcourt depuis l'IHM sans renseigner de chemin dans le Compose par synchronisation. Pour ajouter un autre volume, le monter dans Docker et ajouter son chemin dans `SYNC_MOUNT_ROOTS` (séparateur `;`). Le volume doit être accessible en lecture pour les sources et en écriture pour les destinations ; le processus utilisateur du conteneur doit avoir les droits Synology correspondants. Les deux montages de l'exemple sont en lecture/écriture car chaque volume peut servir de destination. **Restreindre les montages à des répertoires dédiés si cet accès est trop large.** Un chemin hors de ces volumes est refusé, tout comme une destination imbriquée dans une source (ou inversement).
 
+### Filtrage des extensions
+
+Chaque règle peut inclure **tous les fichiers** (par défaut, y compris les anciennes règles) ou **une sélection explicite d'extensions**. Dans la configuration, choisir « Filtrer par extension », puis cocher les groupes **Images**, **Vidéos** et **Documents**, sélectionner des extensions individuellement ou ajouter une extension personnalisée (sans ou avec son point). Les extensions sont normalisées en minuscules et le filtrage est insensible à la casse, y compris pour les noms `.JPG` ou `.MP4`. Une extension composée comme `tar.gz` est également acceptée. Les fichiers exclus ne sont pas copiés et figurent dans le compteur « exclus ». Les dossiers restent parcourus de manière récursive.
+
+### Pause, reprise et annulation
+
+Pour une tâche active, les commandes **Pause** et **Reprendre** pilotent respectivement `POST /api/jobs/:id/pause` et `POST /api/jobs/:id/resume`. La pause fonctionne pendant l'analyse des dossiers et pendant la copie d'un gros fichier (à la prochaine frontière de bloc de données) ; elle ne clôt pas le fichier temporaire. L'annulation reste possible depuis l'état « En pause ». Une pause est **temporaire, en mémoire** : elle ne survit pas au redémarrage du conteneur. Une copie interrompue par une annulation est nettoyée sans publier de fichier incomplet.
+
 ### Règles de synchronisation
 
 Si le chemin relatif n'existe pas dans la destination, Network Sync copie le fichier. S'il existe, on compare par défaut les tailles :
@@ -132,6 +142,6 @@ Node.js 22+, Angular 20, Express 4 :
     npm run build
     APP_USERNAME=admin APP_PASSWORD=motdepassefort123 npm start
 
-L'API comprend `/api/folders` (création sécurisée de dossiers dans le navigateur), `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
+L'API comprend `/api/folders` (création sécurisée de dossiers dans le navigateur), `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/pause`, `/api/jobs/:id/resume`, `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
 
 La configuration est stockée dans `data/jobs.json` ; l'historique se trouve dans `data/history/`.

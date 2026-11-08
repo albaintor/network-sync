@@ -5,6 +5,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { browseDirectories, destinationRootFor, ensureDestinationDirectory, getRoots, validateJobPaths, ValidationError } from './security.js';
 import { executeSync, newProgress } from './engine.js';
+import { normalizeExtensions } from './extensions.js';
+import { PauseGate } from './pause.js';
 import { Storage } from './storage.js';
 import type { CompareMode, ConflictPolicy, RunProgress, SyncJob } from './models.js';
 
@@ -45,7 +47,7 @@ app.use((req, res, next) => {
 app.use('/api', express.json({ limit: '64kb' }));
 
 const schedules = new Map<string, ScheduledTask>();
-let active: { jobId: string; progress: RunProgress; controller: AbortController } | null = null;
+let active: { jobId: string; progress: RunProgress; controller: AbortController; gate: PauseGate } | null = null;
 
 function apiError(res: Response, error: unknown): void {
   const code = error instanceof ValidationError ? 400 : 500;
@@ -94,6 +96,7 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
     destination: path.resolve(obj.destination.trim()),
     conflictPolicy: conflict as ConflictPolicy,
     compareMode: compare as CompareMode,
+    extensions: obj.extensions === undefined ? (old?.extensions ?? null) : normalizeExtensions(obj.extensions),
     cron: schedule || null,
     enabled: obj.enabled === undefined ? true : obj.enabled,
     createdAt: old?.createdAt ?? now,
@@ -104,9 +107,10 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
 function launch(job: SyncJob, dryRun: boolean): RunProgress {
   if (active) throw new ValidationError('Une synchronisation est déjà en cours : ' + active.progress.jobName);
   const controller = new AbortController();
+  const gate = new PauseGate();
   const progress = newProgress(job, dryRun);
-  active = { jobId: job.id, progress, controller };
-  void executeSync(job, progress, roots, controller.signal)
+  active = { jobId: job.id, progress, controller, gate };
+  void executeSync(job, progress, roots, controller.signal, () => {}, gate)
     .then(() => storage.addHistory(progress))
     .catch(error => console.error('Impossible de sauvegarder l’historique :', error))
     .finally(() => { active = null; });
@@ -200,6 +204,34 @@ app.post('/api/jobs/:id/run', route(async (req, res) => {
   const dryRun = req.body?.dryRun === true;
   res.status(202).json({ run: launch(job, dryRun) });
 }));
+
+app.post('/api/jobs/:id/pause', (req, res) => {
+  if (!active || active.jobId !== req.params.id) {
+    res.status(404).json({ error: 'Aucune synchronisation active pour cette tâche.' });
+    return;
+  }
+  if (active.progress.status !== 'running') {
+    res.status(409).json({ error: 'Seule une synchronisation en cours peut être mise en pause.' });
+    return;
+  }
+  active.gate.pause();
+  active.progress.status = 'paused';
+  res.json({ run: active.progress });
+});
+
+app.post('/api/jobs/:id/resume', (req, res) => {
+  if (!active || active.jobId !== req.params.id) {
+    res.status(404).json({ error: 'Aucune synchronisation active pour cette tâche.' });
+    return;
+  }
+  if (active.progress.status !== 'paused') {
+    res.status(409).json({ error: 'Cette synchronisation n’est pas en pause.' });
+    return;
+  }
+  active.progress.status = 'running';
+  active.gate.resume();
+  res.json({ run: active.progress });
+});
 
 app.post('/api/jobs/:id/cancel', (_req, res) => {
   if (!active || active.jobId !== _req.params.id) {

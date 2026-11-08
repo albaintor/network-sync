@@ -9,16 +9,18 @@ interface Job {
   id: string; name: string; sources: string[]; destination: string;
   conflictPolicy: ConflictPolicy; compareMode: CompareMode;
   cron: string | null; enabled: boolean; updatedAt: string;
+  extensions?: string[] | null;
 }
 interface JobForm {
   name: string; sources: string[]; destination: string;
   conflictPolicy: ConflictPolicy; compareMode: CompareMode; cron: string; enabled: boolean;
+  extensions: string[] | null;
 }
 interface Run {
   id: string; jobId: string; jobName: string; status: string;
   phase: string; dryRun: boolean; startedAt: string; finishedAt?: string;
   filesTotal: number; bytesTotal: number; processed: number;
-  bytesCopied: number; copied: number; skipped: number; renamed: number;
+  bytesCopied: number; copied: number; skipped: number; excluded?: number; renamed: number;
   overwritten: number; errors: number; errorMessages: string[]; currentFile: string | null;
 }
 
@@ -41,6 +43,24 @@ export class AppComponent implements OnInit, OnDestroy {
   formVisible = false;
   editingId: string | null = null;
   form: JobForm = this.blankForm();
+  extensionDraft = '';
+  readonly extensionPresets = [
+    {
+      key: 'images', label: 'Images',
+      extensions: ['jpg', 'jpeg', 'jpe', 'png', 'heic', 'heif', 'webp', 'gif',
+        'bmp', 'tif', 'tiff', 'avif', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'arw', 'raf', 'orf', 'rw2', 'svg']
+    },
+    {
+      key: 'videos', label: 'Vidéos',
+      extensions: ['mp4', 'mov', 'mkv', 'avi', 'm4v', 'mpg', 'mpeg', 'wmv',
+        'webm', 'ts', 'mts', 'm2ts', 'flv', '3gp', 'vob', 'ogv']
+    },
+    {
+      key: 'documents', label: 'Documents',
+      extensions: ['txt', 'pdf', 'doc', 'docx', 'odt', 'rtf', 'ppt', 'pptx',
+        'odp', 'xls', 'xlsx', 'ods', 'csv', 'md', 'pages', 'numbers', 'key', 'epub']
+    }
+  ];
   browseKind: 'source' | 'destination' | null = null;
   browseIndex = -1;
   browsePath: string | null = null;
@@ -72,7 +92,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private blankForm(): JobForm {
     return { name: '', sources: [''], destination: '', conflictPolicy: 'rename',
-      compareMode: 'size', cron: '', enabled: true };
+      compareMode: 'size', cron: '', enabled: true, extensions: null };
   }
 
   private extractError(error: unknown): string {
@@ -119,12 +139,73 @@ export class AppComponent implements OnInit, OnDestroy {
     this.error = '';
     this.formError = '';
     this.editingId = job?.id ?? null;
+    this.extensionDraft = '';
     this.form = job
       ? { name: job.name, sources: [...job.sources], destination: job.destination,
           conflictPolicy: job.conflictPolicy, compareMode: job.compareMode,
-          cron: job.cron ?? '', enabled: job.enabled }
+          cron: job.cron ?? '', enabled: job.enabled,
+          extensions: job.extensions ? [...job.extensions] : null }
       : this.blankForm();
     this.formVisible = true;
+  }
+  extensionEnabled(extension: string): boolean {
+    return this.form.extensions?.includes(extension) ?? false;
+  }
+  presetChecked(extensions: string[]): boolean {
+    return extensions.every(extension => this.extensionEnabled(extension));
+  }
+  presetCount(extensions: string[]): number {
+    return extensions.filter(extension => this.extensionEnabled(extension)).length;
+  }
+  setExtensionFilter(enabled: boolean): void {
+    this.form.extensions = enabled ? (this.form.extensions ?? []) : null;
+    this.formError = '';
+  }
+  toggleExtension(extension: string): void {
+    if (this.form.extensions === null) this.form.extensions = [];
+    if (this.form.extensions.includes(extension)) {
+      this.form.extensions = this.form.extensions.filter(item => item !== extension);
+    } else if (this.form.extensions.length < 100) {
+      this.form.extensions = [...this.form.extensions, extension];
+    } else {
+      this.formError = '100 extensions maximum par règle.';
+    }
+  }
+  togglePreset(extensions: string[], checked: boolean): void {
+    const current = this.form.extensions ?? [];
+    if (checked) {
+      const merged = [...new Set([...current, ...extensions])];
+      if (merged.length > 100) {
+        this.formError = '100 extensions maximum par règle.';
+        return;
+      }
+      this.form.extensions = merged;
+    } else {
+      this.form.extensions = current.filter(extension => !extensions.includes(extension));
+    }
+    this.formError = '';
+  }
+  addCustomExtensions(): void {
+    if (this.form.extensions === null) this.form.extensions = [];
+    const tokens = this.extensionDraft.split(/[,;\s]+/).filter(Boolean);
+    if (!tokens.length) return;
+    const normalized: string[] = [];
+    for (const token of tokens) {
+      const ext = token.trim().replace(/^\./, '').toLowerCase();
+      if (!/^[a-z0-9]+(?:[._+-][a-z0-9]+)*$/.test(ext) || ext.length > 32) {
+        this.formError = 'Extension invalide : ' + token + '. Utilisez par exemple jpg ou tar.gz.';
+        return;
+      }
+      normalized.push(ext);
+    }
+    const merged = [...new Set([...this.form.extensions, ...normalized])];
+    if (merged.length > 100) {
+      this.formError = '100 extensions maximum par règle.';
+      return;
+    }
+    this.form.extensions = merged;
+    this.formError = '';
+    this.extensionDraft = '';
   }
   addSource(): void { if (this.form.sources.length < 30) this.form.sources.push(''); }
   removeSource(index: number): void {
@@ -135,6 +216,14 @@ export class AppComponent implements OnInit, OnDestroy {
     this.formError = '';
     if (!this.form.name.trim() || this.form.sources.some(x => !x.trim()) || !this.form.destination.trim()) {
       this.formError = 'Veuillez renseigner le nom, toutes les sources et la destination.';
+      return;
+    }
+    if (this.form.extensions !== null && !this.form.extensions.length) {
+      this.formError = 'Sélectionnez au moins une extension, ou choisissez « Tous les fichiers ».';
+      return;
+    }
+    if (this.extensionDraft.trim() && this.form.extensions !== null) {
+      this.formError = 'Cliquez sur « Ajouter » pour prendre en compte les extensions personnalisées.';
       return;
     }
     this.saving = true;
@@ -162,6 +251,18 @@ export class AppComponent implements OnInit, OnDestroy {
     this.http.post<{ run: Run }>('/api/jobs/' + job.id + '/run', { dryRun }).subscribe({
       next: data => { this.active = data.run; this.selectedId = job.id; },
       error: e => this.showError(e)
+    });
+  }
+  pause(job: Job): void {
+    this.http.post<{ run: Run }>('/api/jobs/' + job.id + '/pause', {}).subscribe({
+      next: result => { this.active = result.run; },
+      error: error => this.showError(error)
+    });
+  }
+  resume(job: Job): void {
+    this.http.post<{ run: Run }>('/api/jobs/' + job.id + '/resume', {}).subscribe({
+      next: result => { this.active = result.run; },
+      error: error => this.showError(error)
     });
   }
   cancel(job: Job): void {
@@ -278,7 +379,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   statusLabel(value: string): string {
     return ({ completed: 'Terminé', completed_with_errors: 'Terminé avec erreurs',
-      failed: 'Échec', cancelled: 'Annulé', running: 'En cours' } as Record<string, string>)[value] ?? value;
+      failed: 'Échec', cancelled: 'Annulé', running: 'En cours', paused: 'En pause' } as Record<string, string>)[value] ?? value;
   }
   policyLabel(value: ConflictPolicy): string {
     return ({ rename: 'Renommer les conflits', skip: 'Ignorer les conflits',

@@ -230,3 +230,29 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .folder-row .folder-open > span:nth-child(2) { max-width: none; }
   .folder-row .folder-select { padding: 0 9px; }
 }
+
+/* Per-rule extension filter: presets, individual toggles and arbitrary suffixes. */
+.extension-filter { margin: 20px 0 24px; padding: 18px; border: 1px solid #324864; background: #0d1929; border-radius: 12px; }
+.extension-filter > .helper { margin-top: 0; margin-bottom: 14px; }
+.extension-modes { display: flex; flex-wrap: wrap; gap: 5px 24px; margin-bottom: 13px; }
+.extension-modes .checkbox { margin: 5px 0; }
+.extension-groups { display: grid; gap: 13px; margin: 15px 0 19px; }
+.extension-group { border: 1px solid #344965; background: #101f32; padding: 12px; border-radius: 9px; }
+.extension-group-label { display: flex; gap: 10px; align-items: center; color: #d3e3f6; font-size: 12px; cursor: pointer; margin-bottom: 12px; }
+.extension-group-label input { accent-color: #377fea; width: 16px; height: 16px; }
+.extension-group-label small { margin-left: auto; font-variant-numeric: tabular-nums; color: #93a9c4; }
+.extension-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.extension-chip { cursor: pointer; border: 1px solid #394d69; border-radius: 6px; background: #101a2a; color: #a9bfd9; padding: 5px 9px; font: inherit; font-size: 11px; }
+.extension-chip:hover { border-color: #5f94e8; }
+.extension-chip.selected { color: #f1f8ff; background: #275aa5; border-color: #568af3; }
+.extension-custom-input { margin-bottom: 14px; }
+.extension-custom-input .field { flex: 1; min-width: 0; }
+.extension-custom-input .small-button { white-space: nowrap; }
+.extension-selection { border-top: 1px solid #2d4058; padding-top: 14px; }
+.extension-selection > strong { display: block; font-size: 11px; color: #b7cadf; margin-bottom: 11px; }
+.paused-symbol { font-weight: 800; color: #edc271; font-size: 15px; }
+@media (max-width: 700px) {
+  .extension-filter { padding: 12px; }
+  .extension-custom-input { flex-wrap: nowrap; }
+  .extension-custom-input .field { min-width: 0; }
+}

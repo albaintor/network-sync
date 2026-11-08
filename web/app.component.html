@@ -23,7 +23,8 @@
     <header class="topbar">
       <div class="breadcrumb">Tableau de bord <span>/</span> <strong>{{ selected?.name || 'Accueil' }}</strong></div>
       <div class="top-status">
-        @if (active) { <span class="pulse"></span> Synchronisation en cours }
+        @if (active?.status === 'paused') { <span class="paused-symbol">Ⅱ</span> Synchronisation en pause }
+        @else if (active) { <span class="pulse"></span> Synchronisation en cours }
         @else { <span class="online-dot"></span> Prêt }
       </div>
     </header>
@@ -60,12 +61,22 @@
           <div class="panel-title destination"><span class="panel-icon teal">↓</span><div><h2>Destination</h2><p>Racine commune pour toutes les sources.</p></div></div>
           <div class="destination-path"><code>{{ job.destination }}</code></div>
           <p class="helper">Exemple : <code>2026/01/photo.jpg</code> est copié dans <code>{{ job.destination }}/2026/01/photo.jpg</code>.</p>
+          <p class="helper">Filtre de fichiers :
+            @if (job.extensions?.length) {
+              <strong [title]="job.extensions?.join(', ')">{{ job.extensions?.length }} extension(s) autorisée(s)</strong>
+            } @else { <strong>Tous les fichiers</strong> }
+          </p>
         </section>
 
         <section class="panel operation">
           <div class="panel-title"><span class="panel-icon purple">↻</span><div><h2>Exécuter la synchronisation</h2><p>Copie unidirectionnelle, sans suppression des fichiers.</p></div></div>
           <div class="operation-actions">
             @if (selectedRun; as progress) {
+              @if (progress.status === 'paused') {
+                <button class="button primary" (click)="resume(job)">▶ Reprendre</button>
+              } @else {
+                <button class="button secondary" [disabled]="progress.status !== 'running'" (click)="pause(job)">Ⅱ Mettre en pause</button>
+              }
               <button class="button danger-outline" (click)="cancel(job)">Annuler l'exécution</button>
             } @else {
               <button class="button primary" [disabled]="!!active" (click)="run(job, false)">▶ Synchroniser</button>
@@ -74,9 +85,9 @@
           </div>
           @if (selectedRun; as progress) {
             <div class="progress-area">
-              <div class="progress-heading"><strong>{{ progress.dryRun ? 'Simulation' : 'Synchronisation' }} · {{ progress.phase === 'scanning' ? 'Analyse des sources' : 'Copie des fichiers' }}</strong><span>{{ percentage(progress) }} %</span></div>
+              <div class="progress-heading"><strong>{{ progress.dryRun ? 'Simulation' : 'Synchronisation' }} · {{ progress.status === 'paused' ? 'En pause' : progress.phase === 'scanning' ? 'Analyse des sources' : 'Copie des fichiers' }}</strong><span>{{ percentage(progress) }} %</span></div>
               <div class="progress-track"><div class="progress-fill" [style.width.%]="percentage(progress)"></div></div>
-              <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à copier' : 'copiés' }} · {{ progress.skipped }} ignorés · {{ progress.errors }} erreurs</span></div>
+              <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à copier' : 'copiés' }} · {{ progress.skipped }} ignorés · {{ progress.excluded ?? 0 }} exclus · {{ progress.errors }} erreurs</span></div>
               @if (progress.currentFile) { <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p> }
             </div>
           }
@@ -95,7 +106,7 @@
                     <span class="history-expand">⌄</span>
                   </summary>
                   <div class="history-detail">
-                    <p>{{ run.processed }} / {{ run.filesTotal }} fichiers analysés · {{ formatBytes(run.bytesCopied) }} transférés · {{ run.overwritten }} remplacés · {{ run.errors }} erreurs</p>
+                    <p>{{ run.processed }} / {{ run.filesTotal }} fichiers analysés · {{ formatBytes(run.bytesCopied) }} transférés · {{ run.overwritten }} remplacés · {{ run.excluded ?? 0 }} exclus · {{ run.errors }} erreurs</p>
                     @for (message of run.errorMessages; track $index) { <p class="error-line">{{ message }}</p> }
                   </div>
                 </details>
@@ -145,6 +156,56 @@
             <select id="compare" class="field" [(ngModel)]="form.compareMode"><option value="size">Taille identique = ignorer</option><option value="sha256">Comparer SHA-256</option></select></div>
         </div>
         <p class="helper">En mode renommage, les fichiers de même chemin mais différents sont conservés avec un suffixe stable. La vérification SHA-256 détecte également les différences à taille égale.</p>
+        <div class="extension-filter">
+          <label class="field-label">Extensions de fichiers à synchroniser</label>
+          <p class="helper">Par défaut, tous les fichiers sont synchronisés. Activez le filtre pour sélectionner uniquement certains formats.</p>
+          <div class="extension-modes" role="radiogroup" aria-label="Mode de filtrage des extensions">
+            <label class="checkbox"><input type="radio" name="extension-mode"
+              [checked]="form.extensions === null" (change)="setExtensionFilter(false)"> Tous les fichiers</label>
+            <label class="checkbox"><input type="radio" name="extension-mode"
+              [checked]="form.extensions !== null" (change)="setExtensionFilter(true)"> Filtrer par extension</label>
+          </div>
+          @if (form.extensions !== null) {
+            <div class="extension-groups">
+              @for (preset of extensionPresets; track preset.key) {
+                <div class="extension-group">
+                  <label class="extension-group-label">
+                    <input type="checkbox" [checked]="presetChecked(preset.extensions)"
+                      (change)="togglePreset(preset.extensions, $any($event.target).checked)">
+                    <strong>{{ preset.label }}</strong>
+                    <small>{{ presetCount(preset.extensions) }}/{{ preset.extensions.length }}</small>
+                  </label>
+                  <div class="extension-chips">
+                    @for (extension of preset.extensions; track extension) {
+                      <button type="button" class="extension-chip" [class.selected]="extensionEnabled(extension)"
+                        [attr.aria-pressed]="extensionEnabled(extension)"
+                        (click)="toggleExtension(extension)">.{{ extension }}</button>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+            <label class="field-label" for="custom-extensions">Autres extensions (séparées par virgules)</label>
+            <div class="input-group extension-custom-input">
+              <input id="custom-extensions" class="field" [(ngModel)]="extensionDraft"
+                (keyup.enter)="addCustomExtensions()" placeholder="ex. flac, zip, tar.gz">
+              <button type="button" class="small-button" (click)="addCustomExtensions()">＋ Ajouter</button>
+            </div>
+            <div class="extension-selection">
+              <strong>{{ form.extensions.length }} extension(s) sélectionnée(s)</strong>
+              @if (form.extensions.length) {
+                <div class="extension-chips">
+                  @for (extension of form.extensions; track extension) {
+                    <button type="button" class="extension-chip selected" (click)="toggleExtension(extension)"
+                      [title]="'Retirer .' + extension">.{{ extension }} ×</button>
+                  }
+                </div>
+              } @else {
+                <p class="helper">Sélectionnez au moins une extension, ou revenez à « Tous les fichiers ».</p>
+              }
+            </div>
+          }
+        </div>
         <label class="field-label" for="cron">Planification cron (facultative)</label>
         <input id="cron" class="field mono" [(ngModel)]="form.cron" placeholder="0 3 * * *">
         <p class="helper">Ex. <code>0 3 * * *</code> : chaque jour à 03:00 ({{ timezone }}). Laisser vide pour le mode manuel.</p>

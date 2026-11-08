@@ -8,6 +8,10 @@ services:
     restart: unless-stopped
     init: true
     user: "${PUID:-1026}:${PGID:-100}"
+    # Supplementary NAS ACL group. Example: administrators=101 on Synology.
+    # Keep the default at users=100; opt in to 101 only if required by the ACL.
+    group_add:
+      - "${NAS_EXTRA_GID:-100}"
     ports:
       - "${PORT:-8088}:8080"
     environment:

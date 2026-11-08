@@ -36,7 +36,7 @@ Les autres sources du job utilisent la même racine de destination. Les chemins 
 
 1. Cloner le dépôt ou importer `docker-compose.yml` dans Docker Manager.
 2. Copier `.env.example` en `.env` et renseigner **obligatoirement** `APP_USERNAME` et un `APP_PASSWORD` d'au moins 12 caractères.
-3. Définir `PUID` et `PGID` avec l'utilisateur Synology autorisé à écrire sur la destination USB, puis créer `./data` et lui accorder l'écriture. Vérifier également l'accès aux dossiers sources.
+3. Définir `PUID` et `PGID` avec l'utilisateur Synology autorisé à écrire sur la destination USB, puis créer `./data` et lui accorder l'écriture. Vérifier également l'accès aux dossiers sources. Si une ACL DSM autorise l'accès uniquement à un **groupe secondaire** (par exemple `administrators` = GID `101`), définir `NAS_EXTRA_GID=101` dans `.env`. Le Compose ajoute ce groupe avec `group_add`, sans démarrer le conteneur en root.
 4. Adapter uniquement les **volumes Docker accessibles** et, si nécessaire, `SYNC_MOUNT_ROOTS` dans `docker-compose.yml`. Il n'y a **aucune source ni destination de synchronisation prédéfinie** : les règles se créent dans l'interface.
 5. Démarrer le conteneur puis ouvrir `http://IP_DU_NAS:8088`.
 
@@ -51,6 +51,28 @@ Exemple de lancement :
 **Sans budget GitHub Actions :** le fichier Compose construit désormais l'image `network-sync:local` **directement sur le NAS**. Les workflows GitHub ne sont plus déclenchés automatiquement par les commits ; ils ne peuvent être lancés que manuellement si le budget le permet.
 
 **Docker Manager :** sélectionner le projet `/volume1/docker/network-sync`, la branche `main`, le dépôt `https://github.com/albaintor/network-sync` et le mode **Build local : docker compose build** (`compose-build`). Puis lancer **Déployer** : le manager met à jour le dépôt et construit le conteneur sur le NAS. Ne pas laisser le projet en mode **Image préconstruite** pour cette version : l'image GHCR ne contient pas les derniers correctifs.
+
+### Accès aux dossiers Synology : ACL et groupes supplémentaires
+
+Une permission DSM peut être attribuée au groupe `administrators` plutôt qu'à l'utilisateur directement. Sur certains NAS Synology, le dossier apparaît avec un mode Unix `d---------+` ; les droits effectifs proviennent alors des ACL Synology. Docker ne reprend pas automatiquement les groupes secondaires de l'utilisateur du NAS : `user: "1026:100"` lance le processus avec `gid=100` seulement.
+
+Exemple : si `id damien` affiche `groups=100(users),101(administrators)` et `synoacltool -get /volume1/OneDrive` accorde `rwx` à `administrators`, renseigner dans le fichier `.env` existant :
+
+```dotenv
+PUID=1026
+PGID=100
+NAS_EXTRA_GID=101
+```
+
+Puis recréer le conteneur (aucune nouvelle compilation n'est nécessaire si l'image est déjà disponible) :
+
+```sh
+docker compose up -d --no-build --force-recreate
+docker exec network-sync id
+docker exec network-sync ls /volume1/OneDrive
+```
+
+La première commande `docker exec` doit afficher `groups=100(users),101` (l'affichage du nom du groupe dépend de l'image). **Attention :** ajouter `101` donne au conteneur les droits ACL du groupe administrateurs sur **tous les dossiers montés dans le conteneur**. Limiter les montages `/volume1` et `/volumeUSB1` aux dossiers nécessaires si possible. Ne pas utiliser `root` ou `chmod -R 777` pour contourner les ACL.
 
 ### Montages et chemins
 

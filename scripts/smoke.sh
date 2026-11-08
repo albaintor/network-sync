@@ -5,7 +5,9 @@ WORK="$(mktemp -d)"
 NAME="network-sync-smoke-$$"
 cleanup() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  rm -rf "$WORK"
+  # Files created by the container are root-owned on the CI runner.
+  docker run --rm --entrypoint sh -v "$WORK:/work" network-sync:test -c "chmod -R a+rwX /work" >/dev/null 2>&1 || true
+  rm -rf "$WORK" || true
 }
 trap cleanup EXIT
 

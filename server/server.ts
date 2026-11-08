@@ -83,6 +83,9 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
   if (obj.enabled !== undefined && typeof obj.enabled !== 'boolean') {
     throw new ValidationError('Le champ activé doit être booléen.');
   }
+  if (!(obj.sources as string[]).every(x => path.isAbsolute(x.trim())) || !path.isAbsolute(obj.destination.trim())) {
+    throw new ValidationError('Les chemins doivent être absolus.');
+  }
   const now = new Date().toISOString();
   return {
     id: old?.id ?? randomUUID(),

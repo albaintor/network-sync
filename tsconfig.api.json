@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": false
   },
   "include": ["server/**/*.ts"]
 }

@@ -1,5 +1,96 @@
 # Network Sync
 
-Dockerized multi-source NAS folder synchronization service with a Node.js API and Angular web interface.
+Network Sync est une application de synchronisation **unidirectionnelle et non destructive** des dossiers d'un NAS. Elle fusionne plusieurs dossiers sources vers une même destination, conserve les sous-dossiers et expose un tableau de bord Angular via un serveur Node.js/Express.
 
-> Implementation in progress; see subsequent commits for the application.
+## Fonctionnalités
+
+- Plusieurs tâches indépendantes, chacune avec 1 à 30 dossiers sources et une destination.
+- Conservation de l'arborescence **relative à chaque dossier source**.
+- Conflits paramétrables : **renommer** (par défaut), **ignorer**, **écraser**.
+- Mode par défaut : même chemin et même taille = fichier déjà présent. Mode optionnel SHA-256 pour différencier deux fichiers de même taille.
+- Renommage stable, par exemple `photo__0a6c2d8e13.jpg` : une exécution répétée ne produit pas de copies supplémentaires si le contenu n'a pas changé.
+- Exécution manuelle, simulation sans écriture, annulation, progression et historique des 30 dernières exécutions.
+- Planification cron facultative avec fuseau horaire (par défaut `Europe/Paris`).
+- Explorateur des répertoires autorisés, interface responsive, authentification HTTP Basic.
+- **Aucune suppression** dans la destination ou les sources. Liens symboliques ignorés dans les sources, refusés dans les chemins de destination.
+
+## Exemple Synology
+
+Les sources :
+
+    /volume1/OneDrive/OneDrive Damien/Images Damien/2026/01/photo.jpg
+    /volume1/OneDrive/OneDrive Ludivine/Images/2026/01/photo.jpg
+
+La destination :
+
+    /volumeUSB1/usbshare/Photos
+
+produisent, si les fichiers sont différents :
+
+    /volumeUSB1/usbshare/Photos/2026/01/photo.jpg
+    /volumeUSB1/usbshare/Photos/2026/01/photo__<identifiant>.jpg
+
+Les autres sources du job utilisent la même racine de destination. Les chemins se saisissent **sans caractères d'échappement shell** : les espaces sont acceptés tels quels.
+
+## Installation Docker / Docker Manager
+
+1. Cloner le dépôt ou importer `docker-compose.yml` dans Docker Manager.
+2. Copier `.env.example` en `.env` et renseigner **obligatoirement** `APP_USERNAME` et un `APP_PASSWORD` d'au moins 12 caractères.
+3. Définir `PUID` et `PGID` avec l'utilisateur Synology autorisé à écrire sur la destination USB, puis créer `./data` et lui accorder l'écriture. Vérifier également l'accès aux dossiers sources.
+4. Adapter les volumes et les deux variables `SYNC_SOURCE_ROOTS` / `SYNC_DEST_ROOTS` dans `docker-compose.yml`.
+5. Démarrer le conteneur puis ouvrir `http://IP_DU_NAS:8088`.
+
+Exemple de lancement :
+
+    cp .env.example .env
+    # Modifier .env, puis :
+    mkdir -p data
+    sudo chown 1026:100 data  # Adapter au PUID:PGID réel
+    docker compose pull
+    docker compose up -d
+
+L'image est publiée sur `ghcr.io/albaintor/network-sync:latest` (AMD64 et ARM64) à chaque validation du workflow CI sur `main`. Pour compiler localement à la place : remplacer `image` / `pull_policy` par `build: .`, puis exécuter `docker compose up -d --build`.
+
+### Montages et chemins
+
+Le Compose d'exemple fournit :
+
+| Hôte Synology | Conteneur | Mode |
+| --- | --- | --- |
+| `/volume1/OneDrive` | `/volume1/OneDrive` | Lecture seule |
+| `/volumeUSB1/usbshare` | `/volumeUSB1/usbshare` | Lecture/écriture |
+| `./data` | `/app/data` | Lecture/écriture (configuration et historique) |
+
+Ainsi les chemins indiqués dans l'interface sont les chemins Synology exacts. Ajouter d'autres montages si les tâches doivent accéder à d'autres volumes. Déclarer plusieurs racines autorisées dans `SYNC_SOURCE_ROOTS` ou `SYNC_DEST_ROOTS` en les séparant par des points-virgules (`;`). Un chemin hors de ces racines est refusé, tout comme une destination imbriquée dans une source (ou inversement).
+
+### Règles de synchronisation
+
+Si le chemin relatif n'existe pas dans la destination, Network Sync copie le fichier. S'il existe, on compare par défaut les tailles :
+
+- **Même taille** : fichier considéré comme déjà présent, sans nouvelle copie. Activer SHA-256 pour vérifier aussi le contenu.
+- **Taille différente** (ou SHA-256 différent) : par défaut créer une copie suffixée, sans écraser le fichier existant.
+- **Ignorer** : ne rien copier si le fichier cible existe et diffère.
+- **Écraser** : remplacer le fichier cible en cas de différence.
+
+Les copies s'effectuent d'abord dans un fichier temporaire dans le dossier cible, puis sont publiées atomiquement. Les horodatages de modification sont conservés. Les nouvelles versions d'un fichier modifié peuvent être conservées avec un nouveau suffixe. Aucun nettoyage/suppression automatique n'est effectué.
+
+Une seule tâche peut s'exécuter à la fois. Une occurrence cron est ignorée si une autre synchronisation est déjà en cours ; elle n'est pas mise en file d'attente.
+
+### Sécurité
+
+**Ne pas exposer directement le port HTTP sur Internet.** L'authentification Basic doit être protégée par HTTPS si l'application est accessible au-delà d'un réseau local de confiance. Le conteneur monte ses sources en lecture seule, refuse les liens symboliques en destination et fonctionne sans privilèges Linux supplémentaires. Le dossier USB cible et `data` doivent être inscriptibles par le PUID/PGID configuré.
+
+Ne donnez pas au conteneur accès à tout `/volume1` en écriture si cela n'est pas nécessaire.
+
+## Développement
+
+Node.js 22+, Angular 20, Express 4 :
+
+    npm install
+    npm test
+    npm run build
+    APP_USERNAME=admin APP_PASSWORD=motdepassefort123 npm start
+
+L'API comprend `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
+
+La configuration est stockée dans `data/jobs.json` ; l'historique se trouve dans `data/history/`.

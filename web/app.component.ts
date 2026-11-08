@@ -47,6 +47,8 @@ export class AppComponent implements OnInit, OnDestroy {
   directories: { path: string; name: string }[] = [];
   browseLoading = false;
   timezone = 'Europe/Paris';
+  sourceRoots: string[] = [];
+  destinationRoots: string[] = [];
 
   get selected(): Job | undefined { return this.jobs.find(j => j.id === this.selectedId); }
   get selectedRun(): Run | null { return this.active?.jobId === this.selectedId ? this.active : null; }
@@ -55,8 +57,8 @@ export class AppComponent implements OnInit, OnDestroy {
     this.load();
     this.pollStatus();
     this.timer = setInterval(() => this.pollStatus(), 1500);
-    this.http.get<{ timezone: string }>('/api/settings').subscribe({
-      next: data => this.timezone = data.timezone,
+    this.http.get<{ timezone: string; roots: { sources: string[]; destinations: string[] } }>('/api/settings').subscribe({
+      next: data => { this.timezone = data.timezone; this.sourceRoots = data.roots.sources; this.destinationRoots = data.roots.destinations; },
       error: e => this.showError(e)
     });
   }
@@ -177,6 +179,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   browseUp(): void {
     if (!this.browsePath) return;
+    const roots = this.browseKind === 'source' ? this.sourceRoots : this.destinationRoots;
+    if (roots.includes(this.browsePath)) { this.listDirectories(); return; }
     const parent = this.browsePath.slice(0, this.browsePath.lastIndexOf('/')) || '/';
     // Returning to the list of authorized roots never traverses outside them.
     this.listDirectories(parent === '/' ? undefined : parent);

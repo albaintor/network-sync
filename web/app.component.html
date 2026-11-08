@@ -61,11 +61,24 @@
           <div class="panel-title destination"><span class="panel-icon teal">↓</span><div><h2>Destination</h2><p>Racine commune pour toutes les sources.</p></div></div>
           <div class="destination-path"><code>{{ job.destination }}</code></div>
           <p class="helper">Exemple : <code>2026/01/photo.jpg</code> est copié dans <code>{{ job.destination }}/2026/01/photo.jpg</code>.</p>
-          <p class="helper">Filtre de fichiers :
-            @if (job.extensions?.length) {
-              <strong [title]="job.extensions?.join(', ')">{{ job.extensions?.length }} extension(s) autorisée(s)</strong>
-            } @else { <strong>Tous les fichiers</strong> }
-          </p>
+          <div class="rule-filter-summary">
+            <p class="helper">Extensions :
+              @if (job.extensions?.length) {
+                <strong [title]="job.extensions?.join(', ')">{{ job.extensions?.length }} extension(s) autorisée(s)</strong>
+              } @else { <strong>Tous les fichiers</strong> }
+            </p>
+            <p class="helper">Taille :
+              @if (job.sizeFilter; as sizeFilter) {
+                <strong>{{ sizeFilter.operator === 'gt' ? '>' : '<' }} {{ sizeFilter.megabytes }} Mo</strong>
+              } @else { <strong>Sans restriction</strong> }
+            </p>
+            <p class="helper">Nom :
+              @if (job.filenameRegex) {
+                <code [title]="job.filenameRegex">{{ job.filenameRegex }}</code>
+                @if (job.filenameRegexIgnoreCase) { <span>(casse ignorée)</span> }
+              } @else { <strong>Sans restriction</strong> }
+            </p>
+          </div>
         </section>
 
         <section class="panel operation">
@@ -205,6 +218,39 @@
               }
             </div>
           }
+        </div>
+        <div class="file-filter-options">
+          <div class="file-filter-section">
+            <label class="field-label" for="size-filter-mode">Filtrer par taille de fichier</label>
+            <div class="size-filter-row">
+              <select id="size-filter-mode" class="field" [ngModel]="sizeFilterMode()"
+                (ngModelChange)="setSizeFilterMode($event)">
+                <option value="none">Toutes les tailles</option>
+                <option value="gt">Plus grand que (&gt;)</option>
+                <option value="lt">Plus petit que (&lt;)</option>
+              </select>
+              @if (form.sizeFilter) {
+                <div class="size-threshold">
+                  <input id="size-threshold" type="number" class="field" min="0" max="100000000"
+                    step="any" [ngModel]="form.sizeFilter.megabytes"
+                    (ngModelChange)="setSizeThreshold($event)" aria-label="Seuil en Mo">
+                  <span>Mo</span>
+                </div>
+              }
+            </div>
+            <p class="helper">Comparaison stricte : un fichier exactement égal au seuil est exclu. 1 Mo = 1 048 576 octets.</p>
+          </div>
+          <div class="file-filter-section">
+            <label class="field-label" for="filename-regex">Expression régulière sur le nom du fichier (facultatif)</label>
+            <input id="filename-regex" class="field mono" [(ngModel)]="form.filenameRegex"
+              maxlength="200" spellcheck="false" placeholder="Ex. ^IMG_[0-9]+\\.(jpg|heic)$">
+            <label class="checkbox">
+              <input type="checkbox" [(ngModel)]="form.filenameRegexIgnoreCase">
+              Ignorer les majuscules/minuscules
+            </label>
+            <p class="helper">Regex JavaScript sur le nom seul, extension comprise, sans chemin de dossier. Exemple : <code>^IMG_[0-9]+\\.(jpg|heic)$</code>. Les expressions coûteuses (groupes répétés, lookarounds et références arrière) sont refusées.</p>
+          </div>
+          <p class="helper">Les filtres d’extension, de taille et de nom se cumulent : un fichier doit respecter tous les critères pour être copié.</p>
         </div>
         <label class="field-label" for="cron">Planification cron (facultative)</label>
         <input id="cron" class="field mono" [(ngModel)]="form.cron" placeholder="0 3 * * *">

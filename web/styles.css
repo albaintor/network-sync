@@ -256,3 +256,22 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .extension-custom-input { flex-wrap: nowrap; }
   .extension-custom-input .field { min-width: 0; }
 }
+
+/* Optional per-rule size threshold and basename regex, combined with extension presets. */
+.rule-filter-summary { margin: 8px 0 2px; border-top: 1px solid #283b53; padding-top: 6px; }
+.rule-filter-summary .helper { margin: 5px 0; overflow-wrap: anywhere; }
+.rule-filter-summary code { overflow-wrap: anywhere; }
+.file-filter-options { display: grid; gap: 16px; margin: 4px 0 22px; }
+.file-filter-section { border: 1px solid #324864; border-radius: 12px; background: #0d1929; padding: 17px; }
+.file-filter-section .helper { margin: 10px 0 0; }
+.size-filter-row { display: flex; gap: 12px; align-items: stretch; }
+.size-filter-row > select { flex: 1; min-width: 0; }
+.size-threshold { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.size-threshold input { width: 115px; font-variant-numeric: tabular-nums; }
+.size-threshold span { color: #b8c9dc; font-size: 12px; }
+.file-filter-section .checkbox { margin: 12px 0 0; }
+@media (max-width: 560px) {
+  .size-filter-row { flex-wrap: wrap; }
+  .size-filter-row > select { flex-basis: 100%; }
+  .file-filter-section { padding: 12px; }
+}

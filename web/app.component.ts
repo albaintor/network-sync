@@ -5,16 +5,24 @@ import { FormsModule } from '@angular/forms';
 
 type ConflictPolicy = 'rename' | 'skip' | 'overwrite';
 type CompareMode = 'size' | 'sha256';
+type SizeFilterMode = 'none' | 'gt' | 'lt';
+interface SizeFilter { operator: 'gt' | 'lt'; megabytes: number; }
 interface Job {
   id: string; name: string; sources: string[]; destination: string;
   conflictPolicy: ConflictPolicy; compareMode: CompareMode;
   cron: string | null; enabled: boolean; updatedAt: string;
   extensions?: string[] | null;
+  sizeFilter?: SizeFilter | null;
+  filenameRegex?: string | null;
+  filenameRegexIgnoreCase?: boolean;
 }
 interface JobForm {
   name: string; sources: string[]; destination: string;
   conflictPolicy: ConflictPolicy; compareMode: CompareMode; cron: string; enabled: boolean;
   extensions: string[] | null;
+  sizeFilter: SizeFilter | null;
+  filenameRegex: string;
+  filenameRegexIgnoreCase: boolean;
 }
 interface Run {
   id: string; jobId: string; jobName: string; status: string;
@@ -92,7 +100,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private blankForm(): JobForm {
     return { name: '', sources: [''], destination: '', conflictPolicy: 'rename',
-      compareMode: 'size', cron: '', enabled: true, extensions: null };
+      compareMode: 'size', cron: '', enabled: true, extensions: null,
+      sizeFilter: null, filenameRegex: '', filenameRegexIgnoreCase: false };
   }
 
   private extractError(error: unknown): string {
@@ -144,9 +153,23 @@ export class AppComponent implements OnInit, OnDestroy {
       ? { name: job.name, sources: [...job.sources], destination: job.destination,
           conflictPolicy: job.conflictPolicy, compareMode: job.compareMode,
           cron: job.cron ?? '', enabled: job.enabled,
-          extensions: job.extensions ? [...job.extensions] : null }
+          extensions: job.extensions ? [...job.extensions] : null,
+          sizeFilter: job.sizeFilter ? { ...job.sizeFilter } : null,
+          filenameRegex: job.filenameRegex ?? '',
+          filenameRegexIgnoreCase: job.filenameRegexIgnoreCase ?? false }
       : this.blankForm();
     this.formVisible = true;
+  }
+  sizeFilterMode(): SizeFilterMode {
+    return this.form.sizeFilter?.operator ?? 'none';
+  }
+  setSizeFilterMode(mode: SizeFilterMode): void {
+    if (mode === 'none') this.form.sizeFilter = null;
+    else this.form.sizeFilter = { operator: mode, megabytes: this.form.sizeFilter?.megabytes ?? 1 };
+    this.formError = '';
+  }
+  setSizeThreshold(megabytes: number | null): void {
+    if (this.form.sizeFilter) this.form.sizeFilter.megabytes = megabytes ?? Number.NaN;
   }
   extensionEnabled(extension: string): boolean {
     return this.form.extensions?.includes(extension) ?? false;
@@ -226,9 +249,20 @@ export class AppComponent implements OnInit, OnDestroy {
       this.formError = 'Cliquez sur « Ajouter » pour prendre en compte les extensions personnalisées.';
       return;
     }
+    if (this.form.sizeFilter &&
+        (!Number.isFinite(this.form.sizeFilter.megabytes) ||
+          this.form.sizeFilter.megabytes < 0 || this.form.sizeFilter.megabytes > 100_000_000)) {
+      this.formError = 'Saisissez un seuil valide entre 0 et 100 000 000 Mo.';
+      return;
+    }
+    if (this.form.filenameRegex.trim().length > 200) {
+      this.formError = 'La regex doit contenir au maximum 200 caractères.';
+      return;
+    }
     this.saving = true;
     const body = { ...this.form, sources: this.form.sources.map(x => x.trim()),
-      destination: this.form.destination.trim(), cron: this.form.cron.trim() || null };
+      destination: this.form.destination.trim(), cron: this.form.cron.trim() || null,
+      filenameRegex: this.form.filenameRegex.trim() || null };
     const id = this.editingId;
     const request = id ? this.http.put<{ job: Job }>('/api/jobs/' + id, body)
       : this.http.post<{ job: Job }>('/api/jobs', body);

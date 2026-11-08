@@ -46,6 +46,10 @@ export class AppComponent implements OnInit, OnDestroy {
   browsePath: string | null = null;
   directories: { path: string; name: string }[] = [];
   browseLoading = false;
+  browseError = '';
+  browseNewFolderName = '';
+  creatingFolder = false;
+  formError = '';
   timezone = 'Europe/Paris';
   sourceRoots: string[] = [];
   destinationRoots: string[] = [];
@@ -69,10 +73,13 @@ export class AppComponent implements OnInit, OnDestroy {
       compareMode: 'size', cron: '', enabled: true };
   }
 
-  private showError(error: unknown): void {
+  private extractError(error: unknown): string {
     const err = error as HttpErrorResponse;
-    this.error = (err.error && typeof err.error.error === 'string')
+    return (err.error && typeof err.error.error === 'string')
       ? err.error.error : (err.message ?? String(error));
+  }
+  private showError(error: unknown): void {
+    this.error = this.extractError(error);
   }
 
   load(): void {
@@ -108,6 +115,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   edit(job?: Job): void {
     this.error = '';
+    this.formError = '';
     this.editingId = job?.id ?? null;
     this.form = job
       ? { name: job.name, sources: [...job.sources], destination: job.destination,
@@ -122,9 +130,9 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   save(): void {
     if (this.saving) return;
-    this.error = '';
+    this.formError = '';
     if (!this.form.name.trim() || this.form.sources.some(x => !x.trim()) || !this.form.destination.trim()) {
-      this.error = 'Veuillez renseigner le nom, toutes les sources et la destination.';
+      this.formError = 'Veuillez renseigner le nom, toutes les sources et la destination.';
       return;
     }
     this.saving = true;
@@ -135,7 +143,7 @@ export class AppComponent implements OnInit, OnDestroy {
       : this.http.post<{ job: Job }>('/api/jobs', body);
     request.subscribe({
       next: data => { this.saving = false; this.formVisible = false; this.selectedId = data.job.id; this.load(); },
-      error: e => { this.saving = false; this.showError(e); }
+      error: e => { this.saving = false; this.formError = this.extractError(e); }
     });
   }
   remove(job: Job): void {
@@ -160,11 +168,18 @@ export class AppComponent implements OnInit, OnDestroy {
     });
   }
   openBrowser(kind: 'source' | 'destination', index = -1): void {
-    this.browseKind = kind; this.browseIndex = index; this.browsePath = null;
-    this.listDirectories();
+    this.browseKind = kind;
+    this.browseIndex = index;
+    this.browseError = '';
+    this.browseNewFolderName = '';
+    this.browsePath = null;
+    // Start at the currently chosen path if it already exists, otherwise show mounts.
+    const current = kind === 'source' ? this.form.sources[index] : this.form.destination;
+    this.listDirectories(current?.trim() || undefined);
   }
   listDirectories(directory?: string): void {
     if (!this.browseKind) return;
+    this.browseError = '';
     this.browseLoading = true;
     const params: Record<string, string> = { kind: this.browseKind };
     if (directory) params['path'] = directory;
@@ -174,7 +189,11 @@ export class AppComponent implements OnInit, OnDestroy {
         this.browsePath = directory ?? null;
         this.browseLoading = false;
       },
-      error: e => { this.browseLoading = false; this.showError(e); }
+      error: e => {
+        this.browseLoading = false;
+        this.browseError = this.extractError(e);
+        if (directory) this.listDirectories();
+      }
     });
   }
   browseUp(): void {
@@ -185,11 +204,32 @@ export class AppComponent implements OnInit, OnDestroy {
     // Returning to the list of authorized roots never traverses outside them.
     this.listDirectories(parent === '/' ? undefined : parent);
   }
-  chooseFolder(): void {
-    if (!this.browsePath) return;
-    if (this.browseKind === 'destination') this.form.destination = this.browsePath;
-    else this.form.sources[this.browseIndex] = this.browsePath;
+  chooseFolder(directory?: string): void {
+    const chosen = directory ?? this.browsePath;
+    if (!chosen) return;
+    if (this.browseKind === 'destination') this.form.destination = chosen;
+    else if (this.browseKind === 'source' && this.browseIndex >= 0) {
+      this.form.sources[this.browseIndex] = chosen;
+    }
     this.browseKind = null;
+  }
+  createFolder(): void {
+    if (!this.browsePath || this.browseKind !== 'destination' || this.creatingFolder) return;
+    const name = this.browseNewFolderName.trim();
+    if (!name || name === '.' || name === '..' || /[/\\]/.test(name)) {
+      this.browseError = 'Saisir un nom de dossier valide, sans séparateur de chemin.';
+      return;
+    }
+    this.creatingFolder = true;
+    this.browseError = '';
+    this.http.post<{ path: string }>('/api/folders', { parent: this.browsePath, name }).subscribe({
+      next: data => {
+        this.creatingFolder = false;
+        this.browseNewFolderName = '';
+        this.listDirectories(data.path);
+      },
+      error: e => { this.creatingFolder = false; this.browseError = this.extractError(e); }
+    });
   }
   formatBytes(bytes: number): string {
     if (bytes < 1024) return bytes + ' o';

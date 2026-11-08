@@ -196,3 +196,18 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .input-group .field { min-width: 100%; }
   .input-group .small-button { height: 34px; }
 }
+
+/* Folder picker: browsing and choosing are separate actions; no preset endpoints. */
+.modal-intro { margin: 0 0 22px; }
+.browse-help { color: #91a8c4; padding: 13px 24px; line-height: 1.6; font-size: 11px; }
+.browse-alert { margin: 8px 24px; }
+.folder-row { display: flex; align-items: stretch; border-bottom: 1px solid #213149; }
+.folder-open { flex: 1; min-width: 0; border-bottom: 0; }
+.folder-select { flex: 0 0 auto; align-self: center; margin: 0 16px 0 6px; height: 33px; }
+.folder-creation { padding: 18px 24px 5px; border-top: 1px solid #283b53; }
+.folder-creation .input-group { margin-bottom: 8px; flex-wrap: nowrap; }
+.folder-creation .small-button { min-height: 38px; }
+@media (max-width: 700px) {
+  .folder-select { margin: 0 10px 0 0; }
+  .folder-creation .input-group .field { min-width: 0; flex: 1; }
+}

@@ -37,7 +37,7 @@ Les autres sources du job utilisent la même racine de destination. Les chemins 
 1. Cloner le dépôt ou importer `docker-compose.yml` dans Docker Manager.
 2. Copier `.env.example` en `.env` et renseigner **obligatoirement** `APP_USERNAME` et un `APP_PASSWORD` d'au moins 12 caractères.
 3. Définir `PUID` et `PGID` avec l'utilisateur Synology autorisé à écrire sur la destination USB, puis créer `./data` et lui accorder l'écriture. Vérifier également l'accès aux dossiers sources.
-4. Adapter les volumes et les deux variables `SYNC_SOURCE_ROOTS` / `SYNC_DEST_ROOTS` dans `docker-compose.yml`.
+4. Adapter uniquement les **volumes Docker accessibles** et, si nécessaire, `SYNC_MOUNT_ROOTS` dans `docker-compose.yml`. Il n'y a **aucune source ni destination de synchronisation prédéfinie** : les règles se créent dans l'interface.
 5. Démarrer le conteneur puis ouvrir `http://IP_DU_NAS:8088`.
 
 Exemple de lancement :
@@ -57,11 +57,13 @@ Le Compose d'exemple fournit :
 
 | Hôte Synology | Conteneur | Mode |
 | --- | --- | --- |
-| `/volume1/OneDrive` | `/volume1/OneDrive` | Lecture seule |
-| `/volumeUSB1/usbshare` | `/volumeUSB1/usbshare` | Lecture/écriture |
+| `/volume1` | `/volume1` | Lecture/écriture |
+| `/volumeUSB1` | `/volumeUSB1` | Lecture/écriture |
 | `./data` | `/app/data` | Lecture/écriture (configuration et historique) |
 
-Ainsi les chemins indiqués dans l'interface sont les chemins Synology exacts. Ajouter d'autres montages si les tâches doivent accéder à d'autres volumes. Déclarer plusieurs racines autorisées dans `SYNC_SOURCE_ROOTS` ou `SYNC_DEST_ROOTS` en les séparant par des points-virgules (`;`). Un chemin hors de ces racines est refusé, tout comme une destination imbriquée dans une source (ou inversement).
+Ainsi les chemins indiqués dans l'interface sont les chemins Synology exacts. **Les montages sont des zones accessibles, pas des synchronisations déjà configurées**. Au premier lancement, aucune règle n'est créée. Dans l'interface : **Nouvelle synchronisation** → saisir un nom → **Parcourir** pour choisir une ou plusieurs sources → **Parcourir** pour choisir la destination (ou créer un sous-dossier) → définir les conflits et la planification → **Enregistrer**. On peut modifier ou supprimer chaque règle ultérieurement.
+
+Les volumes accessibles se déclarent **une fois dans Docker** (par défaut `/volume1` et `/volumeUSB1`) : leur contenu se parcourt depuis l'IHM sans renseigner de chemin dans le Compose par synchronisation. Pour ajouter un autre volume, le monter dans Docker et ajouter son chemin dans `SYNC_MOUNT_ROOTS` (séparateur `;`). Le volume doit être accessible en lecture pour les sources et en écriture pour les destinations ; le processus utilisateur du conteneur doit avoir les droits Synology correspondants. Les deux montages de l'exemple sont en lecture/écriture car chaque volume peut servir de destination. **Restreindre les montages à des répertoires dédiés si cet accès est trop large.** Un chemin hors de ces volumes est refusé, tout comme une destination imbriquée dans une source (ou inversement).
 
 ### Règles de synchronisation
 
@@ -78,9 +80,9 @@ Une seule tâche peut s'exécuter à la fois. Une occurrence cron est ignorée s
 
 ### Sécurité
 
-**Ne pas exposer directement le port HTTP sur Internet.** L'authentification Basic doit être protégée par HTTPS si l'application est accessible au-delà d'un réseau local de confiance. Le conteneur monte ses sources en lecture seule, refuse les liens symboliques en destination et fonctionne sans privilèges Linux supplémentaires. Le dossier USB cible et `data` doivent être inscriptibles par le PUID/PGID configuré.
+**Ne pas exposer directement le port HTTP sur Internet.** L'authentification Basic doit être protégée par HTTPS si l'application est accessible au-delà d'un réseau local de confiance. Le conteneur ne peut parcourir que les montages que vous lui donnez : dans le Compose générique ces montages sont en lecture/écriture pour laisser les règles entièrement configurables dans l'IHM. Il refuse les liens symboliques en destination et fonctionne sans privilèges Linux supplémentaires. Les destinations et `data` doivent être inscriptibles par le PUID/PGID configuré.
 
-Ne donnez pas au conteneur accès à tout `/volume1` en écriture si cela n'est pas nécessaire.
+**Sécurité :** le montage en écriture de tout `/volume1` donne à l'application des permissions étendues. Pour limiter la portée, remplacez les montages par les seuls dossiers NAS dont la synchronisation a besoin ; mettez alors leurs chemins dans `SYNC_MOUNT_ROOTS`.
 
 ## Développement
 
@@ -91,6 +93,6 @@ Node.js 22+, Angular 20, Express 4 :
     npm run build
     APP_USERNAME=admin APP_PASSWORD=motdepassefort123 npm start
 
-L'API comprend `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
+L'API comprend `/api/folders` (création sécurisée de dossiers dans le navigateur), `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
 
 La configuration est stockée dans `data/jobs.json` ; l'historique se trouve dans `data/history/`.

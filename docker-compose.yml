@@ -13,12 +13,14 @@ services:
       APP_USERNAME: "${APP_USERNAME:?Set APP_USERNAME in .env}"
       APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in .env}"
       DATA_DIR: /app/data
-      SYNC_SOURCE_ROOTS: /volume1/OneDrive
-      SYNC_DEST_ROOTS: /volumeUSB1/usbshare
+      # Accessible Docker mounts, NOT preset synchronization source/destination.
+      SYNC_MOUNT_ROOTS: /volume1;/volumeUSB1
     volumes:
       - ./data:/app/data
-      - /volume1/OneDrive:/volume1/OneDrive:ro
-      - /volumeUSB1/usbshare:/volumeUSB1/usbshare:rw
+      # Only directories explicitly mounted here can be selected in the UI.
+      # Both mounts are read/write so either can be chosen as a destination.
+      - /volume1:/volume1:rw
+      - /volumeUSB1:/volumeUSB1:rw
     security_opt:
       - no-new-privileges:true
     cap_drop:

@@ -120,18 +120,20 @@
     <div class="modal" role="dialog" aria-modal="true" aria-label="Configuration de synchronisation" (click)="$event.stopPropagation()">
       <div class="modal-header"><div><div class="eyebrow">CONFIGURATION</div><h2>{{ editingId ? 'Modifier la synchronisation' : 'Nouvelle synchronisation' }}</h2></div><button class="close-button" (click)="formVisible = false">✕</button></div>
       <div class="modal-body">
+        @if (formError) { <div class="alert" role="alert">{{ formError }}</div> }
+        <p class="helper modal-intro">Définissez librement les sources et la destination de cette règle. Aucun dossier n'est sélectionné par défaut.</p>
         <label class="field-label" for="job-name">Nom de la tâche</label>
         <input id="job-name" class="field" [(ngModel)]="form.name" maxlength="100" placeholder="Ex. Sauvegarde des photos">
         <div class="field-heading"><label class="field-label">Dossiers sources</label><button class="text-button" (click)="addSource()">＋ Ajouter une source</button></div>
         @for (source of form.sources; track $index) {
           <div class="input-group">
-            <input class="field mono" [(ngModel)]="form.sources[$index]" placeholder="/volume1/OneDrive/...">
+            <input class="field mono" [(ngModel)]="form.sources[$index]" placeholder="Choisir un dossier source ou saisir son chemin">
             <button class="small-button" title="Parcourir les dossiers" (click)="openBrowser('source', $index)">Parcourir</button>
             <button class="small-button icon-only" title="Retirer cette source" [disabled]="form.sources.length === 1" (click)="removeSource($index)">✕</button>
           </div>
         }
         <label class="field-label" for="destination">Destination</label>
-        <div class="input-group"><input id="destination" class="field mono" [(ngModel)]="form.destination" placeholder="/volumeUSB1/usbshare/Photos"><button class="small-button" (click)="openBrowser('destination')">Parcourir</button></div>
+        <div class="input-group"><input id="destination" class="field mono" [(ngModel)]="form.destination" placeholder="Choisir une destination ou saisir son chemin"><button class="small-button" (click)="openBrowser('destination')">Parcourir</button></div>
         <div class="two-fields">
           <div><label class="field-label" for="conflict">En cas de différence</label>
             <select id="conflict" class="field" [(ngModel)]="form.conflictPolicy">
@@ -157,16 +159,32 @@
   <div class="modal-backdrop folder-layer" (click)="browseKind = null">
     <div class="browser-modal" role="dialog" aria-modal="true" aria-label="Explorateur de dossiers" (click)="$event.stopPropagation()">
       <div class="modal-header"><div><div class="eyebrow">EXPLORATEUR NAS</div><h2>Choisir un dossier {{ browseKind === 'source' ? 'source' : 'destination' }}</h2></div><button class="close-button" (click)="browseKind = null">✕</button></div>
-      <div class="browser-path"><button class="small-button" (click)="listDirectories()">Racines</button><button class="small-button" [disabled]="!browsePath" (click)="browseUp()">↑ Parent</button><code>{{ browsePath || 'Racines autorisées' }}</code></div>
+      <p class="browse-help">Parcourez les volumes accessibles au conteneur. Vous pouvez sélectionner directement un volume ou un de ses sous-dossiers.</p>
+      <div class="browser-path"><button class="small-button" (click)="listDirectories()">Volumes</button><button class="small-button" [disabled]="!browsePath" (click)="browseUp()">↑ Parent</button><code>{{ browsePath || 'Volumes montés dans Docker' }}</code></div>
+      @if (browseError) { <div class="alert browse-alert" role="alert">{{ browseError }}</div> }
       <div class="folder-list">
         @if (browseLoading) { <div class="empty-history">Chargement…</div> }
         @else {
           @for (directory of directories; track directory.path) {
-            <button class="folder" (click)="listDirectories(directory.path)"><span>▤</span><span>{{ directory.name }}</span><small>{{ directory.path }}</small><span>›</span></button>
+            <div class="folder-row">
+              <button class="folder folder-open" (click)="listDirectories(directory.path)" [title]="directory.path">
+                <span>▤</span><span>{{ directory.name }}</span><small>{{ directory.path }}</small><span>›</span>
+              </button>
+              <button class="small-button folder-select" (click)="chooseFolder(directory.path)">Choisir</button>
+            </div>
           } @empty { <p class="empty-history">Aucun sous-dossier.</p> }
         }
       </div>
-      <div class="modal-footer"><button class="button secondary" (click)="browseKind = null">Annuler</button><button class="button primary" [disabled]="!browsePath" (click)="chooseFolder()">Utiliser ce dossier</button></div>
+      @if (browseKind === 'destination' && browsePath) {
+        <div class="folder-creation">
+          <label class="field-label" for="new-folder-name">Créer un sous-dossier dans le répertoire courant</label>
+          <div class="input-group">
+            <input id="new-folder-name" class="field" [(ngModel)]="browseNewFolderName" maxlength="255" placeholder="Nouveau dossier" (keyup.enter)="createFolder()">
+            <button class="small-button" [disabled]="creatingFolder || !browseNewFolderName.trim()" (click)="createFolder()">Créer</button>
+          </div>
+        </div>
+      }
+      <div class="modal-footer"><button class="button secondary" (click)="browseKind = null">Annuler</button><button class="button primary" [disabled]="!browsePath" (click)="chooseFolder()">Utiliser le dossier courant</button></div>
     </div>
   </div>
 }

@@ -17,13 +17,20 @@ function mustBeAbsolute(input: string): void {
   }
 }
 
+/**
+ * Roots are Docker mount points, not configured synchronization endpoints.
+ * Every sync rule chooses its own source(s) and destination through the UI.
+ * Only directories mounted by the operator are reachable from the container.
+ */
 export function getRoots(): Roots {
-  const parse = (value: string | undefined, fallback: string): string[] =>
-    (value ?? fallback).split(';').map(x => x.trim()).filter(Boolean).map(x => path.resolve(x));
-  return {
-    sources: parse(process.env.SYNC_SOURCE_ROOTS, '/volume1/OneDrive'),
-    destinations: parse(process.env.SYNC_DEST_ROOTS, '/volumeUSB1/usbshare')
-  };
+  const value = process.env.SYNC_MOUNT_ROOTS ?? '/volume1;/volumeUSB1';
+  const mounts = [...new Set(value.split(';').map(x => x.trim()).filter(Boolean))];
+  if (!mounts.length || mounts.some(x => !path.isAbsolute(x) || x.includes('\0') || x === '/')) {
+    throw new ValidationError('SYNC_MOUNT_ROOTS doit contenir des dossiers absolus (hors /).');
+  }
+  const allowed = mounts.map(mount => path.resolve(mount));
+  // A mounted volume can be a source for one task and the destination for another.
+  return { sources: allowed, destinations: allowed };
 }
 
 async function ensureWithinRoot(input: string, roots: string[], existing: boolean): Promise<string> {

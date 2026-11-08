@@ -38,6 +38,15 @@ if [[ "$READY" != 1 ]]; then
 fi
 
 AUTH='smoke:smokepassword1234'
+SETTINGS=$(curl -fsS -u "$AUTH" http://127.0.0.1:18080/api/settings)
+[[ "$SETTINGS" == *'/volume1'* && "$SETTINGS" == *'/volumeUSB1'* ]] || {
+  echo 'Expected configurable NAS mount points in API settings' >&2
+  exit 1
+}
+curl -fsS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"parent":"/volumeUSB1/usbshare","name":"Generated from browser"}' \
+  http://127.0.0.1:18080/api/folders >/dev/null
+[[ -d "$WORK/destination/Generated from browser" ]] || { echo 'Folder creation failed' >&2; exit 1; }
 STATUS=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs)
 [[ "$STATUS" == 401 ]] || { echo 'Unauthenticated access was not blocked' >&2; exit 1; }
 

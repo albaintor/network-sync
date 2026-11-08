@@ -3,7 +3,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cron, { type ScheduledTask } from 'node-cron';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { browseDirectories, getRoots, validateJobPaths, ValidationError } from './security.js';
+import { browseDirectories, destinationRootFor, ensureDestinationDirectory, getRoots, validateJobPaths, ValidationError } from './security.js';
 import { executeSync, newProgress } from './engine.js';
 import { Storage } from './storage.js';
 import type { CompareMode, ConflictPolicy, RunProgress, SyncJob } from './models.js';
@@ -139,6 +139,23 @@ app.get('/api/browse', route(async (req, res) => {
   res.json({ directories: dirs });
 }));
 
+// Create a destination subfolder from the browser, but never outside mounted roots.
+app.post('/api/folders', route(async (req, res) => {
+  const parent = req.body?.parent;
+  const name = req.body?.name;
+  if (typeof parent !== 'string' || typeof name !== 'string' ||
+      !name.trim() || name.length > 255 || name === '.' || name === '..' ||
+      name.includes('/') || name.includes('\\') || name.includes('\0')) {
+    throw new ValidationError('Nom de dossier ou chemin parent invalide.');
+  }
+  const root = await destinationRootFor(parent, roots);
+  // Parent must exist and be a real directory (no symlink traversal).
+  await browseDirectories(roots.destinations, parent);
+  const folder = path.join(parent, name);
+  await ensureDestinationDirectory(root, folder, true);
+  res.status(201).json({ path: folder });
+}));
+
 app.post('/api/jobs', route(async (req, res) => {
   const job = parseJob(req.body);
   await validateJobPaths(job, roots);
@@ -204,6 +221,5 @@ app.use(express.static(frontend, { index: false, maxAge: '1h' }));
 app.get('*', (_req, res) => res.sendFile(path.join(frontend, 'index.html')));
 app.listen(port, '0.0.0.0', () => {
   console.log('Network Sync listening on ' + port);
-  console.log('Source roots: ' + roots.sources.join(', '));
-  console.log('Destination roots: ' + roots.destinations.join(', '));
+  console.log('Mounted NAS roots: ' + roots.sources.join(', '));
 });

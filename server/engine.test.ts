@@ -154,7 +154,10 @@ test('a paused sync does not write and resumes from the pending file', async () 
   }, gate);
   // The synchronous update fires before the first copy, so the pause gate
   // prevents output even if the job has no other files.
-  while (!paused) await new Promise(resolve => setImmediate(resolve));
+  for (let attempt = 0; attempt < 500 && !paused; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(paused, true, 'Timed out before entering the paused copying phase');
   assert.equal(gate.isPaused, true);
   await assert.rejects(readdir(destination), { code: 'ENOENT' });
   gate.resume();
@@ -175,7 +178,10 @@ test('a paused sync can be cancelled without leaving copied files', async () => 
   const promise = executeSync(job, progress, roots, controller.signal, () => {
     if (progress.phase === 'copying' && !paused) { paused = true; gate.pause(); }
   }, gate);
-  while (!paused) await new Promise(resolve => setImmediate(resolve));
+  for (let attempt = 0; attempt < 500 && !paused; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(paused, true, 'Timed out before entering the paused copying phase');
   controller.abort();
   await promise;
   assert.equal(progress.status, 'cancelled');

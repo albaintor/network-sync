@@ -16,6 +16,7 @@ mkdir -p "$WORK/source/OneDrive 1/Photos/2026/01" \
          "$WORK/destination" "$WORK/data"
 printf 'AAA' > "$WORK/source/OneDrive 1/Photos/2026/01/photo.jpg"
 printf 'BBBBBBBB' > "$WORK/source/OneDrive 2/Photos/2026/01/photo.jpg"
+printf 'EXCLUDED' > "$WORK/source/OneDrive 1/Photos/2026/01/document.pdf"
 
 docker run -d --rm --name "$NAME" -p 127.0.0.1:18080:8080 \
   -e APP_USERNAME=smoke -e APP_PASSWORD='smokepassword1234' \
@@ -51,7 +52,7 @@ STATUS=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs
 [[ "$STATUS" == 401 ]] || { echo 'Unauthenticated access was not blocked' >&2; exit 1; }
 
 RESPONSE=$(curl -fsS -u "$AUTH" -H 'Content-Type: application/json' \
-  -d '{"name":"Smoke test","sources":["/volume1/OneDrive/OneDrive 1/Photos","/volume1/OneDrive/OneDrive 2/Photos"],"destination":"/volumeUSB1/usbshare/Photos","conflictPolicy":"rename","compareMode":"size","enabled":true}' \
+  -d '{"name":"Smoke test","sources":["/volume1/OneDrive/OneDrive 1/Photos","/volume1/OneDrive/OneDrive 2/Photos"],"destination":"/volumeUSB1/usbshare/Photos","conflictPolicy":"rename","compareMode":"size","extensions":[".JPG","jpg"],"enabled":true}' \
   http://127.0.0.1:18080/api/jobs)
 ID=$(node -p 'JSON.parse(process.argv[1]).job.id' "$RESPONSE")
 curl -fsS -u "$AUTH" -H 'Content-Type: application/json' -d '{"dryRun":false}' \
@@ -74,4 +75,12 @@ FOLDER="$WORK/destination/Photos/2026/01"
 
 RUNS=$(curl -fsS -u "$AUTH" "http://127.0.0.1:18080/api/jobs/$ID/runs")
 [[ "$RUNS" == *'"status":"completed"'* ]] || { echo "Unexpected sync status: $RUNS" >&2; exit 1; }
-echo 'Docker smoke test passed (auth, API, multiple sources, conflict rename, persistence).'
+[[ "$RUNS" == *'"excluded":1'* ]] || { echo "Expected one filtered file: $RUNS" >&2; exit 1; }
+[[ ! -e "$FOLDER/document.pdf" ]] || { echo 'Excluded PDF was copied' >&2; exit 1; }
+JOBS=$(curl -fsS -u "$AUTH" http://127.0.0.1:18080/api/jobs)
+[[ "$JOBS" == *'"extensions":["jpg"]'* ]] || { echo "Extension normalization failed: $JOBS" >&2; exit 1; }
+INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"Bad extension","sources":["/volume1/OneDrive/OneDrive 1/Photos"],"destination":"/volumeUSB1/usbshare/Other","extensions":[]}' \
+  -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs)
+[[ "$INVALID" == 400 ]] || { echo "Expected invalid extension filter to fail: $INVALID" >&2; exit 1; }
+echo 'Docker smoke test passed (auth, API, multiple sources, conflict rename, extension filter, persistence).'

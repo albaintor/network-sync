@@ -69,13 +69,23 @@ async function ensureWithinRoot(input: string, roots: string[], existing: boolea
   throw new ValidationError('Chemin absent ou hors des racines autorisées : ' + normalized);
 }
 
-export async function validateJobPaths(job: Pick<SyncJob, 'sources' | 'destination'>, roots: Roots): Promise<void> {
+export async function validateJobPaths(job: Pick<SyncJob, 'sources' | 'destination' | 'operation'>, roots: Roots): Promise<void> {
   if (!Array.isArray(job.sources) || job.sources.length < 1 || job.sources.length > 30) {
     throw new ValidationError('Il faut entre 1 et 30 dossiers sources.');
   }
   mustBeAbsolute(job.destination);
   if (new Set(job.sources.map(x => path.resolve(x))).size !== job.sources.length) {
     throw new ValidationError('Les dossiers sources ne doivent pas être dupliqués.');
+  }
+  // Moving a nested source twice would delete it during the first pass.
+  if (job.operation === 'move') {
+    for (let i = 0; i < job.sources.length; i++) {
+      for (let j = i + 1; j < job.sources.length; j++) {
+        if (isInside(job.sources[i], job.sources[j]) || isInside(job.sources[j], job.sources[i])) {
+          throw new ValidationError('Les sources ne doivent pas être imbriquées en mode déplacement.');
+        }
+      }
+    }
   }
   for (const source of job.sources) {
     await ensureWithinRoot(source, roots.sources, true);

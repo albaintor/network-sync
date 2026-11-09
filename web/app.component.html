@@ -25,7 +25,7 @@
       <div class="breadcrumb">Tableau de bord <span>/</span> <strong>{{ selected?.name || 'Accueil' }}</strong></div>
       <div class="top-status">
         @if (active?.status === 'paused') { <span class="paused-symbol">Ⅱ</span> Synchronisation en pause }
-        @else if (active) { <span class="pulse"></span> Synchronisation en cours }
+        @else if (active) { <span class="pulse"></span> {{ active.operation === 'duplicates' ? 'Analyse des doublons en cours' : 'Synchronisation en cours' }} }
         @else { <span class="online-dot"></span> Prêt }
       </div>
     </header>
@@ -206,7 +206,7 @@
                 <details class="history-row">
                   <summary>
                     <span class="run-status" [class.success]="run.status === 'completed'" [class.warning]="run.errors > 0">{{ statusLabel(run.status) }}</span>
-                    <span>{{ date(run.startedAt) }} @if (run.dryRun) { <span class="simulated">Simulation</span> }</span>
+                    <span>{{ date(run.startedAt) }} @if (run.dryRun && run.operation !== 'duplicates') { <span class="simulated">Simulation</span> }</span>
                     <span class="history-numbers">
                       @if (run.operation === 'duplicates') { {{ run.filesTotal }} examinés · {{ run.candidateFiles ?? 0 }} hachés · {{ run.duplicateGroups ?? 0 }} groupes }
                       @else { {{ run.copied }} transférés · @if (run.operation === 'move') { {{ run.moved ?? 0 }} déplacés · } {{ run.skipped }} ignorés · {{ run.renamed }} renommés }
@@ -233,7 +233,7 @@
           <button class="button primary" (click)="edit()">＋ Créer une synchronisation</button>
           <button class="button secondary" (click)="edit(); setOperation('duplicates')">⌕ Rechercher des doublons</button></div>
       }
-      <footer>Network Sync · Copie ou déplacement · Les liens symboliques sont ignorés</footer>
+      <footer>Network Sync · Copie, déplacement et détection de doublons · Liens symboliques ignorés</footer>
     </div>
   </main>
 </div>
@@ -244,7 +244,7 @@
       <div class="modal-header"><div><div class="eyebrow">CONFIGURATION</div><h2>{{ editingId ? 'Modifier la synchronisation' : 'Nouvelle synchronisation' }}</h2></div><button class="close-button" (click)="formVisible = false">✕</button></div>
       <div class="modal-body">
         @if (formError) { <div class="alert" role="alert">{{ formError }}</div> }
-        <p class="helper modal-intro">Définissez librement les sources et la destination de cette règle. Aucun dossier n'est sélectionné par défaut.</p>
+        <p class="helper modal-intro">Choisissez une opération, puis ses dossiers. Les règles de recherche de doublons n'ont pas besoin de destination.</p>
         <label class="field-label" for="job-name">Nom de la tâche</label>
         <input id="job-name" class="field" [(ngModel)]="form.name" maxlength="100" placeholder="Ex. Sauvegarde des photos">
         <label class="field-label" for="operation">Type d'opération</label>

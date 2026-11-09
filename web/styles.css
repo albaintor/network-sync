@@ -275,3 +275,29 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .size-filter-row > select { flex-basis: 100%; }
   .file-filter-section { padding: 12px; }
 }
+
+/* Duplicate review: keep one file per hash group, delete only on explicit action. */
+.duplicate-bulk-actions { align-items: center; margin: 18px 0; }
+.duplicate-bulk-actions strong { color: #c5d6ed; font-size: 12px; font-weight: 650; margin-left: auto; }
+.duplicate-group-list { display: flex; flex-direction: column; gap: 16px; }
+.duplicate-group { padding: 16px; border: 1px solid #2b405a; background: #0e1929; border-radius: 11px; }
+.duplicate-group-heading { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; color: #a2b6ce; font-size: 12px; }
+.duplicate-group-heading .checkbox { color: #e1ebfa; font-weight: 700; }
+.duplicate-hash { font-size: 11px; color: #7791b1; padding: 6px 0 13px; overflow-wrap: anywhere; }
+.duplicate-hash code { font-size: 10px; }
+.duplicate-file { display: flex; align-items: center; gap: 12px; padding: 12px; margin: 5px 0; border: 1px solid #28384e; border-radius: 8px; cursor: pointer; background: #132033; }
+.duplicate-file.kept { border-color: #3679aa; background: #173048; }
+.duplicate-file input { accent-color: #62a6ef; flex-shrink: 0; }
+.duplicate-file-detail { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+.duplicate-file-detail strong { font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
+.duplicate-file-detail code { color: #8a9fb9; font-size: 10px; overflow-wrap: anywhere; }
+.keep-label { font-size: 10px; color: #9ab2c8; text-align: right; max-width: 120px; }
+.duplicate-file.kept .keep-label { color: #7dccb2; font-weight: 700; }
+.duplicate-delete-action { align-items: center; margin-top: 20px; }
+.duplicate-delete-action .helper { flex: 1; font-size: 11px; }
+.duplicate-notice { margin-top: 16px; padding: 12px 14px; border: 1px solid #416482; border-radius: 8px; color: #bfdafa; background: #15273a; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .duplicate-file { align-items: flex-start; flex-wrap: wrap; }
+  .keep-label { max-width: none; text-align: left; margin-left: 23px; }
+  .duplicate-bulk-actions strong { margin-left: 0; flex-basis: 100%; }
+}

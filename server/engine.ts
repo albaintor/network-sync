@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import type { Roots, RunProgress, SyncJob } from './models.js';
 import { destinationRootFor, ensureDestinationDirectory, isInside, validateJobPaths, ValidationError } from './security.js';
 import { compileFilenameRegex, matchesFileFilters } from './filters.js';
+import { isAppleLivePhotoVideo } from './live-photo.js';
 import { PauseGate } from './pause.js';
 import { publishWithoutOverwrite } from './publish.js';
 import { chooseWriteMode } from './write-mode.js';
@@ -34,7 +35,7 @@ function aborted(signal: AbortSignal): void {
 
 async function* walk(
   directory: string, base: string, signal: AbortSignal, gate: PauseGate,
-  job: SyncJob, regex: RegExp | null, exclude: () => void
+  job: SyncJob, regex: RegExp | null, exclude: (reason?: 'live-photo') => void
 ): AsyncGenerator<FileTask> {
   await gate.wait(signal);
   const handle = await opendir(directory);
@@ -59,6 +60,10 @@ async function* walk(
       if (!info.isFile()) continue;
       if (!matchesFileFilters(entry.name, info.size, job, regex)) {
         exclude();
+        continue;
+      }
+      if (job.excludeLivePhotos && await isAppleLivePhotoVideo(filename, signal)) {
+        exclude('live-photo');
         continue;
       }
       yield {
@@ -288,7 +293,7 @@ export function newProgress(job: SyncJob, dryRun: boolean): RunProgress {
     id: randomUUID(), jobId: job.id, jobName: job.name, operation: job.operation ?? 'copy', dryRun,
     status: 'running', phase: 'scanning', startedAt: new Date().toISOString(),
     filesTotal: 0, bytesTotal: 0, processed: 0, bytesCopied: 0,
-    copied: 0, moved: 0, skipped: 0, excluded: 0, renamed: 0, overwritten: 0, errors: 0,
+    copied: 0, moved: 0, skipped: 0, excluded: 0, livePhotosExcluded: 0, renamed: 0, overwritten: 0, errors: 0,
     errorMessages: [], currentFile: null
   };
 }
@@ -313,8 +318,9 @@ export async function executeSync(
     const regex = compileFilenameRegex(job.filenameRegex, job.filenameRegexIgnoreCase ?? false);
     const tasks: FileTask[] = [];
     for (const source of job.sources) {
-      for await (const task of walk(source, source, signal, gate, job, regex, () => {
+      for await (const task of walk(source, source, signal, gate, job, regex, reason => {
         progress.excluded = (progress.excluded ?? 0) + 1;
+        if (reason === 'live-photo') progress.livePhotosExcluded = (progress.livePhotosExcluded ?? 0) + 1;
       })) {
         tasks.push(task);
         progress.filesTotal++;

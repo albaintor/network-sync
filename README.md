@@ -19,6 +19,7 @@ Network Sync est une application de transfert **unidirectionnel** des dossiers d
 - Filtrage facultatif par extensions, avec présélections **images**, **vidéos**, **documents**, sélection individuelle et extensions personnalisées.
 - **Filtrage par taille** : fichiers strictement supérieurs ou inférieurs à un seuil réglable en Mo (1 Mo = 1 048 576 octets).
 - **Filtrage du nom** : expression régulière JavaScript facultative sur le nom de fichier (extension incluse), avec option pour ignorer la casse. Tous les filtres sont cumulables.
+- **Exclure les Live Photos** : filtre facultatif fondé sur les métadonnées QuickTime Apple des clips MOV/MP4/M4V ; aucune exclusion des vidéos ordinaires selon leur seule taille ou durée.
 - **Pause / reprise** des synchronisations et simulations actives : l'exploration est suspendue et la copie peut être suspendue entre les blocs de données, sans abandonner le fichier temporaire.
 - Explorateur des répertoires autorisés, interface responsive, authentification HTTP Basic.
 - En mode **copie**, aucune suppression de fichiers sources ; en mode **déplacement**, suppression individuelle après vérification, sans purge des fichiers exclus ou ignorés. Liens symboliques ignorés dans les sources, refusés dans les chemins de destination.
@@ -154,6 +155,18 @@ L'API expose `GET /api/jobs/:id/duplicates` (groupes et identifiant du scan) et 
 
 Chaque règle peut inclure **tous les fichiers** (par défaut, y compris les anciennes règles) ou **une sélection explicite d'extensions**. Dans la configuration, choisir « Filtrer par extension », puis cocher les groupes **Images**, **Vidéos** et **Documents**, sélectionner des extensions individuellement ou ajouter une extension personnalisée (sans ou avec son point). Les extensions sont normalisées en minuscules et le filtrage est insensible à la casse, y compris pour les noms `.JPG` ou `.MP4`. Une extension composée comme `tar.gz` est également acceptée. Les fichiers exclus ne sont pas copiés et figurent dans le compteur « exclus ». Les dossiers restent parcourus de manière récursive.
 
+### Exclure les Live Photos Apple
+
+Dans la configuration d'une tâche de **copie** ou de **déplacement**, cocher **« Exclure les Live Photos »** pour ignorer les petits clips qui accompagnent les photos animées d'un iPhone. L'option est **désactivée par défaut**, y compris pour les tâches déjà enregistrées.
+
+- Examine uniquement les conteneurs `.mov`, `.mp4` et `.m4v`, sans tenir compte de la casse. Les séquences des Live Photos sont habituellement en **MOV**.
+- Après les contrôles d'extension, de taille et de nom, recherche dans l'atome QuickTime `moov` les clés `com.apple.quicktime.content.identifier` et `com.apple.quicktime.still-image-time`. Ces marqueurs associent le clip à la photo fixe et caractérisent les Live Photos Apple ; l'analyse ignore les données vidéo volumineuses de `mdat`.
+- Ne repose **ni sur la durée ni sur la taille**. Les vraies vidéos courtes sans marqueur sont conservées, ainsi que les photos JPEG/HEIC et les vidéos d'autres formats.
+- Les clips reconnus apparaissent dans le compteur `exclus`, avec un sous-compteur **Live Photos**. Ils restent à la source, y compris en mode déplacement. La simulation applique le même filtre.
+- Les métadonnées absentes ou supprimées lors d'un export/transcodage empêchent une détection fiable : en l'absence de marqueur identifiable, la vidéo est conservée. L'inspection borne la lecture du bloc `moov` à 64 Mio pour éviter une analyse trop coûteuse.
+
+Ce filtre est indépendant de la recherche de doublons et s'additionne aux filtres habituels.
+
 ### Filtres de taille et de nom
 
 Dans la fenêtre de configuration d'une règle, en complément du choix des extensions :
@@ -210,7 +223,7 @@ Node.js 22+, Angular 20, Express 4 :
     npm run build
     APP_USERNAME=admin APP_PASSWORD=motdepassefort123 npm start
 
-Les paramètres API `operation` (`copy`, `move` ou `duplicates`) et `layout` (`tree` ou `flat`) sont facultatifs, avec `copy` et `tree` comme valeurs par défaut. `duplicates` utilise un seul dossier source, pas de destination et aucune planification. `sizeFilter` (ex. `{"operator":"gt","megabytes":10}`), `filenameRegex` (ex. `"^IMG_[0-9]+\\.jpg$"`) et `filenameRegexIgnoreCase` restent facultatifs. Envoyer `null` pour désactiver un filtre. Les règles plus anciennes sont compatibles.
+Les paramètres API `operation` (`copy`, `move` ou `duplicates`) et `layout` (`tree` ou `flat`) sont facultatifs, avec `copy` et `tree` comme valeurs par défaut. `duplicates` utilise un seul dossier source, pas de destination et aucune planification. `sizeFilter` (ex. `{"operator":"gt","megabytes":10}`), `filenameRegex` (ex. `"^IMG_[0-9]+\\.jpg$"`) et `filenameRegexIgnoreCase` et `excludeLivePhotos` (booléen, par défaut `false`) restent facultatifs. Envoyer `null` pour désactiver un filtre. Les règles plus anciennes sont compatibles.
 
 L'API comprend `/api/folders` (création sécurisée de dossiers dans le navigateur), `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/pause`, `/api/jobs/:id/resume`, `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/jobs/:id/duplicates`, `/api/jobs/:id/duplicates/delete`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
 

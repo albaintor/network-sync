@@ -584,3 +584,77 @@ test('explicit overwrite still uses temporary file and atomic rename in direct m
     else process.env.NETWORK_SYNC_WRITE_MODE = previous;
   }
 });
+
+
+test('optional Live Photo filter excludes paired Apple MOV and MP4, not ordinary short videos or photos', async () => {
+  const { first, destination, job, run } = await setup();
+  function movie(metadata: string): Buffer {
+    const atom = (type: string, payload: Buffer): Buffer => {
+      const header = Buffer.alloc(8);
+      header.writeUInt32BE(payload.length + 8, 0);
+      header.write(type, 4, 'latin1');
+      return Buffer.concat([header, payload]);
+    };
+    return Buffer.concat([atom('ftyp', Buffer.from('qt  ')),
+      atom('moov', atom('keys', Buffer.from(metadata))),
+      atom('mdat', Buffer.from('video data'))]);
+  }
+  await writeFile(path.join(first, 'IMG_0001.MOV'),
+    movie('com.apple.quicktime.content.identifier'));
+  await writeFile(path.join(first, 'IMG_0002.mp4'),
+    movie('com.apple.quicktime.still-image-time'));
+  await writeFile(path.join(first, 'short.MOV'),
+    movie('com.apple.quicktime.creationdate'));
+  await writeFile(path.join(first, 'IMG_0001.JPG'), 'photo');
+  job.extensions = ['mov', 'mp4', 'jpg'];
+  job.excludeLivePhotos = true;
+
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.filesTotal, 2);
+  assert.equal(result.excluded, 2);
+  assert.equal(result.livePhotosExcluded, 2);
+  assert.deepEqual((await readdir(destination)).sort(), ['IMG_0001.JPG', 'short.MOV']);
+  assert.equal(await readFile(path.join(first, 'IMG_0001.MOV')).then(x => x.length) > 0, true);
+});
+
+test('Live Photo exclusion defaults off and is applied in simulation without removing source', async () => {
+  const { first, destination, job, run } = await setup();
+  const header = Buffer.alloc(8);
+  const payload = Buffer.from('com.apple.quicktime.content.identifier');
+  header.writeUInt32BE(8 + payload.length);
+  header.write('moov', 4);
+  await writeFile(path.join(first, 'live.mov'), Buffer.concat([header, payload]));
+
+  const noFilter = await run(true);
+  assert.equal(noFilter.status, 'completed');
+  assert.equal(noFilter.filesTotal, 1);
+  assert.equal(noFilter.livePhotosExcluded, 0);
+
+  job.excludeLivePhotos = true;
+  const filtered = await run(true);
+  assert.equal(filtered.status, 'completed');
+  assert.equal(filtered.filesTotal, 0);
+  assert.equal(filtered.excluded, 1);
+  assert.equal(filtered.livePhotosExcluded, 1);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+  assert.equal((await readFile(path.join(first, 'live.mov'))).length, 8 + payload.length);
+});
+
+test('Live Photo filter does not move or delete paired source video', async () => {
+  const { first, destination, job, run } = await setup();
+  const payload = Buffer.from('com.apple.quicktime.still-image-time');
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(payload.length + 8);
+  header.write('moov', 4);
+  const movie = Buffer.concat([header, payload]);
+  await writeFile(path.join(first, 'paired.MOV'), movie);
+  job.operation = 'move';
+  job.excludeLivePhotos = true;
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.livePhotosExcluded, 1);
+  assert.equal(result.moved, 0);
+  assert.deepEqual(await readFile(path.join(first, 'paired.MOV')), movie);
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});

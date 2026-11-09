@@ -163,6 +163,7 @@
                 <strong>{{ sizeFilter.operator === 'gt' ? '>' : '<' }} {{ sizeFilter.megabytes }} Mo</strong>
               } @else { <strong>Sans restriction</strong> }
             </p>
+            <p class="helper">Live Photos : <strong>{{ job.excludeLivePhotos ? 'Vidéos associées exclues (métadonnées Apple)' : 'Non filtrées' }}</strong></p>
             <p class="helper">Nom :
               @if (job.filenameRegex) {
                 <code [title]="job.filenameRegex">{{ job.filenameRegex }}</code>
@@ -191,7 +192,7 @@
             <div class="progress-area">
               <div class="progress-heading"><strong>{{ progress.dryRun ? 'Simulation' : 'Synchronisation' }} · {{ progress.status === 'paused' ? 'En pause' : progress.phase === 'scanning' ? 'Analyse des sources' : job.operation === 'move' ? 'Déplacement des fichiers' : 'Copie des fichiers' }}</strong><span>{{ percentage(progress) }} %</span></div>
               <div class="progress-track"><div class="progress-fill" [style.width.%]="percentage(progress)"></div></div>
-              <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à transférer' : 'transférés' }} · @if (job.operation === 'move') { {{ progress.moved ?? 0 }} {{ progress.dryRun ? 'à supprimer à la source' : 'supprimés à la source' }} · } {{ progress.skipped }} ignorés · {{ progress.excluded ?? 0 }} exclus · {{ progress.errors }} erreurs</span></div>
+              <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à transférer' : 'transférés' }} · @if (job.operation === 'move') { {{ progress.moved ?? 0 }} {{ progress.dryRun ? 'à supprimer à la source' : 'supprimés à la source' }} · } {{ progress.skipped }} ignorés · {{ progress.excluded ?? 0 }} exclus @if (progress.livePhotosExcluded) { (dont {{ progress.livePhotosExcluded }} Live Photos) } · {{ progress.errors }} erreurs</span></div>
               @if (!progress.dryRun && progress.phase !== 'scanning') {
                 <div class="transfer-metrics">
                   <div class="transfer-metric">
@@ -252,7 +253,7 @@
                   <div class="history-detail">
                     <p>
                       @if (run.operation === 'duplicates') { {{ run.filesTotal }} fichiers parcourus · {{ run.candidateFiles ?? 0 }} candidats SHA-256 · {{ run.duplicateGroups ?? 0 }} groupes · {{ run.errors }} erreurs }
-                      @else { {{ run.processed }} / {{ run.filesTotal }} fichiers analysés · {{ formatBytes(run.bytesCopied) }} transférés · {{ run.overwritten }} remplacés · {{ run.excluded ?? 0 }} exclus · {{ run.errors }} erreurs · Durée : {{ durationSince(run.transferStartedAt ?? run.startedAt, run.finishedAt) }} }
+                      @else { {{ run.processed }} / {{ run.filesTotal }} fichiers analysés · {{ formatBytes(run.bytesCopied) }} transférés · {{ run.overwritten }} remplacés · {{ run.excluded ?? 0 }} exclus @if (run.livePhotosExcluded) { (dont {{ run.livePhotosExcluded }} Live Photos) } · {{ run.errors }} erreurs · Durée : {{ durationSince(run.transferStartedAt ?? run.startedAt, run.finishedAt) }} }
                     </p>
                     @for (message of run.errorMessages; track $index) { <p class="error-line">{{ message }}</p> }
                   </div>
@@ -383,6 +384,13 @@
         </div>
         <div class="file-filter-options">
           <div class="file-filter-section">
+            <label class="checkbox">
+              <input type="checkbox" [(ngModel)]="form.excludeLivePhotos">
+              <strong>Exclure les Live Photos</strong>
+            </label>
+            <p class="helper">Examine les métadonnées QuickTime des fichiers .MOV, .MP4 et .M4V : identifiant Apple de Live Photo ou marqueur d’image fixe. Les vidéos courtes classiques sont conservées, quelle que soit leur durée ou leur taille. Les fichiers sans marqueur reconnaissable restent inclus.</p>
+          </div>
+          <div class="file-filter-section">
             <label class="field-label" for="size-filter-mode">Filtrer par taille de fichier</label>
             <div class="size-filter-row">
               <select id="size-filter-mode" class="field" [ngModel]="sizeFilterMode()"
@@ -412,7 +420,7 @@
             </label>
             <p class="helper">Regex JavaScript sur le nom seul, extension comprise, sans chemin de dossier. Exemple : <code>^IMG_[0-9]+\.(jpg|heic)$</code>. Les expressions coûteuses (groupes répétés, lookarounds et références arrière) sont refusées.</p>
           </div>
-          <p class="helper">Les filtres d’extension, de taille et de nom se cumulent : un fichier doit respecter tous les critères pour être transféré.</p>
+          <p class="helper">Les filtres d’extension, de taille, de nom et de Live Photos se cumulent : un fichier doit respecter tous les critères pour être transféré.</p>
         </div>
         <label class="field-label" for="cron">Planification cron (facultative)</label>
         <input id="cron" class="field mono" [(ngModel)]="form.cron" placeholder="0 3 * * *">

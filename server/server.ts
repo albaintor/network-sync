@@ -152,7 +152,7 @@ function scheduleJob(job: SyncJob): void {
   schedules.delete(job.id);
   if (job.operation === 'duplicates' || !job.enabled || !job.cron || !cron.validate(job.cron)) return;
   schedules.set(job.id, cron.schedule(job.cron, () => {
-    if (!active) launch(job, false);
+    if (!active && !deletingDuplicates) launch(job, false);
     else console.warn('Synchronisation planifiée ignorée : une autre tâche est déjà en cours :', job.name);
   }, { timezone: process.env.TZ ?? 'Europe/Paris', noOverlap: true }));
 }
@@ -203,7 +203,7 @@ app.post('/api/jobs', route(async (req, res) => {
 app.put('/api/jobs/:id', route(async (req, res) => {
   const previous = jobById(req.params.id);
   if (!previous) { res.status(404).json({ error: 'Tâche introuvable' }); return; }
-  if (active?.jobId === previous.id) { res.status(409).json({ error: 'Tâche en cours de synchronisation' }); return; }
+  if (active?.jobId === previous.id || deletingDuplicates) { res.status(409).json({ error: 'Opération en cours' }); return; }
   const job = parseJob(req.body, previous);
   if (job.operation === 'duplicates') await browseDirectories(roots.sources, job.sources[0]);
   else await validateJobPaths(job, roots);
@@ -217,7 +217,7 @@ app.put('/api/jobs/:id', route(async (req, res) => {
 app.delete('/api/jobs/:id', route(async (req, res) => {
   const job = jobById(req.params.id);
   if (!job) { res.status(404).json({ error: 'Tâche introuvable' }); return; }
-  if (active?.jobId === job.id) { res.status(409).json({ error: 'Tâche en cours de synchronisation' }); return; }
+  if (active?.jobId === job.id || deletingDuplicates) { res.status(409).json({ error: 'Opération en cours' }); return; }
   schedules.get(job.id)?.stop();
   schedules.delete(job.id);
   duplicateResults.delete(job.id);

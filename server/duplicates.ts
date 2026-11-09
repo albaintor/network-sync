@@ -10,6 +10,7 @@ export interface DuplicateFile {
   path: string;
   size: number;
   mtimeMs: number;
+  ctimeMs: number;
   dev: number;
   ino: number;
   nlink: number;
@@ -70,7 +71,7 @@ async function hashFile(filename: string, signal: AbortSignal, gate: PauseGate):
 }
 
 function sameIdentity(file: DuplicateFile, value: DuplicateFile): boolean {
-  return file.size === value.size && file.mtimeMs === value.mtimeMs &&
+  return file.size === value.size && file.mtimeMs === value.mtimeMs && file.ctimeMs === value.ctimeMs &&
     file.dev === value.dev && file.ino === value.ino && file.nlink === value.nlink;
 }
 
@@ -87,7 +88,7 @@ async function verifyFile(file: DuplicateFile, directory: string, canonicalRoot:
   if (!isInside(canonicalRoot, actual)) throw new ValidationError('Chemin réel hors du dossier analysé.');
   const stat = await lstat(file.path);
   if (!stat.isFile() || stat.isSymbolicLink() || !sameIdentity(file, {
-    path: file.path, size: stat.size, mtimeMs: stat.mtimeMs, dev: stat.dev, ino: stat.ino, nlink: stat.nlink
+    path: file.path, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, dev: stat.dev, ino: stat.ino, nlink: stat.nlink
   })) {
     throw new ValidationError('Fichier modifié depuis le scan : ' + file.path);
   }
@@ -117,7 +118,7 @@ export async function scanDuplicates(
         // Files with multiple hard links do not release their blocks when only one link is removed.
         if (!info.isFile() || info.isSymbolicLink() || info.nlink > 1) continue;
         const file: DuplicateFile = {
-          path: filename, size: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino, nlink: info.nlink
+          path: filename, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, dev: info.dev, ino: info.ino, nlink: info.nlink
         };
         const entries = bySize.get(info.size) ?? [];
         entries.push(file);

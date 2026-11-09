@@ -72,16 +72,22 @@ async function* walk(
   }
 }
 
-async function sha256(filename: string): Promise<string> {
+async function sha256(filename: string, signal: AbortSignal, gate: PauseGate): Promise<string> {
   const hash = createHash('sha256');
-  for await (const chunk of createReadStream(filename)) hash.update(chunk as Buffer);
+  for await (const chunk of createReadStream(filename, { signal })) {
+    await gate.wait(signal);
+    hash.update(chunk as Buffer);
+  }
   return hash.digest('hex');
 }
 
-async function sameFile(task: FileTask, occupant: Occupant, mode: SyncJob['compareMode']): Promise<boolean> {
+async function sameFile(
+  task: FileTask, occupant: Occupant, mode: SyncJob['compareMode'], signal: AbortSignal, gate: PauseGate
+): Promise<boolean> {
   if (task.size !== occupant.size) return false;
   if (mode === 'size') return true;
-  return (await sha256(task.sourcePath)) === (await sha256(occupant.virtual?.sourcePath ?? occupant.path));
+  return (await sha256(task.sourcePath, signal, gate)) ===
+    (await sha256(occupant.virtual?.sourcePath ?? occupant.path, signal, gate));
 }
 
 function renamedPath(original: string, unique: string, number: number): string {
@@ -133,7 +139,7 @@ async function removeMovedSource(
   if (!output.isFile() || output.isSymbolicLink() || output.size !== info.size) {
     throw new Error('Cible invalide : suppression de la source refusée.');
   }
-  if (await sha256(task.sourcePath) !== await sha256(target)) {
+  if (await sha256(task.sourcePath, signal, gate) !== await sha256(target, signal, gate)) {
     throw new Error('La vérification SHA-256 a échoué : source conservée.');
   }
   await gate.wait(signal);
@@ -271,7 +277,7 @@ export async function executeSync(
         const comparison = job.operation === 'move' ? 'sha256' : job.compareMode;
 
         if (existing) {
-          if (await sameFile(task, existing, comparison)) {
+          if (await sameFile(task, existing, comparison, signal, gate)) {
             action = 'same';
           } else if (job.conflictPolicy === 'skip') {
             action = 'skip';
@@ -290,7 +296,7 @@ export async function executeSync(
                 found = true;
                 break;
               }
-              if (await sameFile(task, occupant, comparison)) {
+              if (await sameFile(task, occupant, comparison, signal, gate)) {
                 target = candidate;
                 action = 'same';
                 found = true;

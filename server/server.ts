@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { browseDirectories, destinationRootFor, ensureDestinationDirectory, getRoots, validateJobPaths, ValidationError } from './security.js';
 import { executeSync, newProgress } from './engine.js';
+import { scanDuplicates, deleteDuplicates, type DuplicateScan, type DuplicateSelection } from './duplicates.js';
 import { normalizeExtensions } from './extensions.js';
 import { normalizeFilenameRegex, normalizeFilenameRegexIgnoreCase, normalizeSizeFilter } from './filters.js';
 import { PauseGate } from './pause.js';
@@ -49,6 +50,8 @@ app.use('/api', express.json({ limit: '64kb' }));
 
 const schedules = new Map<string, ScheduledTask>();
 let active: { jobId: string; progress: RunProgress; controller: AbortController; gate: PauseGate } | null = null;
+const duplicateResults = new Map<string, DuplicateScan>();
+let deletingDuplicates = false;
 
 function apiError(res: Response, error: unknown): void {
   const code = error instanceof ValidationError ? 400 : 500;
@@ -74,15 +77,19 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
       obj.sources.some(x => typeof x !== 'string' || x.length > 2048 || !x.trim())) {
     throw new ValidationError('Veuillez renseigner 1 à 30 sources valides.');
   }
-  if (typeof obj.destination !== 'string' || !obj.destination.trim() || obj.destination.length > 2048) {
+  const operation = obj.operation ?? old?.operation ?? 'copy';
+  if (!['copy', 'move', 'duplicates'].includes(String(operation))) throw new ValidationError('Opération inconnue.');
+  if (operation === 'duplicates' && (obj.sources as string[]).length !== 1) {
+    throw new ValidationError('La recherche de doublons nécessite un seul dossier.');
+  }
+  if (operation !== 'duplicates' &&
+      (typeof obj.destination !== 'string' || !obj.destination.trim() || obj.destination.length > 2048)) {
     throw new ValidationError('Destination invalide.');
   }
   const conflict = obj.conflictPolicy ?? 'rename';
   if (!['rename', 'skip', 'overwrite'].includes(String(conflict))) throw new ValidationError('Règle de conflit inconnue.');
   const compare = obj.compareMode ?? 'size';
   if (!['size', 'sha256'].includes(String(compare))) throw new ValidationError('Mode de comparaison inconnu.');
-  const operation = obj.operation ?? old?.operation ?? 'copy';
-  if (operation !== 'copy' && operation !== 'move') throw new ValidationError('Opération de transfert inconnue.');
   const layout = obj.layout ?? old?.layout ?? 'tree';
   if (layout !== 'tree' && layout !== 'flat') throw new ValidationError('Organisation de destination inconnue.');
   const schedule = typeof obj.cron === 'string' ? obj.cron.trim() : '';
@@ -90,7 +97,8 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
   if (obj.enabled !== undefined && typeof obj.enabled !== 'boolean') {
     throw new ValidationError('Le champ activé doit être booléen.');
   }
-  if (!(obj.sources as string[]).every(x => path.isAbsolute(x.trim())) || !path.isAbsolute(obj.destination.trim())) {
+  if (!(obj.sources as string[]).every(x => path.isAbsolute(x.trim())) ||
+      (operation !== 'duplicates' && !path.isAbsolute(obj.destination as string))) {
     throw new ValidationError('Les chemins doivent être absolus.');
   }
   const now = new Date().toISOString();
@@ -98,7 +106,7 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
     id: old?.id ?? randomUUID(),
     name,
     sources: (obj.sources as string[]).map(x => path.resolve(x.trim())),
-    destination: path.resolve(obj.destination.trim()),
+    destination: operation === 'duplicates' ? '' : path.resolve((obj.destination as string).trim()),
     conflictPolicy: conflict as ConflictPolicy,
     compareMode: compare as CompareMode,
     operation: operation as TransferMode,
@@ -108,7 +116,7 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
     filenameRegex: obj.filenameRegex === undefined ? (old?.filenameRegex ?? null) : normalizeFilenameRegex(obj.filenameRegex),
     filenameRegexIgnoreCase: obj.filenameRegexIgnoreCase === undefined
       ? (old?.filenameRegexIgnoreCase ?? false) : normalizeFilenameRegexIgnoreCase(obj.filenameRegexIgnoreCase),
-    cron: schedule || null,
+    cron: operation === 'duplicates' ? null : (schedule || null),
     enabled: obj.enabled === undefined ? true : obj.enabled,
     createdAt: old?.createdAt ?? now,
     updatedAt: now
@@ -116,22 +124,33 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
 }
 
 function launch(job: SyncJob, dryRun: boolean): RunProgress {
-  if (active) throw new ValidationError('Une synchronisation est déjà en cours : ' + active.progress.jobName);
+  if (active || deletingDuplicates) throw new ValidationError('Une opération est déjà en cours.');
   const controller = new AbortController();
   const gate = new PauseGate();
   const progress = newProgress(job, dryRun);
   active = { jobId: job.id, progress, controller, gate };
-  void executeSync(job, progress, roots, controller.signal, () => {}, gate)
-    .then(() => storage.addHistory(progress))
-    .catch(error => console.error('Impossible de sauvegarder l’historique :', error))
-    .finally(() => { active = null; });
+  if (job.operation === 'duplicates') {
+    duplicateResults.delete(job.id);
+    void scanDuplicates(job, progress, roots, controller.signal, () => {}, gate)
+      .then(result => {
+        if (result) duplicateResults.set(job.id, result);
+        return storage.addHistory(progress);
+      })
+      .catch(error => console.error('Impossible d’enregistrer l’analyse des doublons :', error))
+      .finally(() => { active = null; });
+  } else {
+    void executeSync(job, progress, roots, controller.signal, () => {}, gate)
+      .then(() => storage.addHistory(progress))
+      .catch(error => console.error('Impossible de sauvegarder l’historique :', error))
+      .finally(() => { active = null; });
+  }
   return progress;
 }
 
 function scheduleJob(job: SyncJob): void {
   schedules.get(job.id)?.stop();
   schedules.delete(job.id);
-  if (!job.enabled || !job.cron || !cron.validate(job.cron)) return;
+  if (job.operation === 'duplicates' || !job.enabled || !job.cron || !cron.validate(job.cron)) return;
   schedules.set(job.id, cron.schedule(job.cron, () => {
     if (!active) launch(job, false);
     else console.warn('Synchronisation planifiée ignorée : une autre tâche est déjà en cours :', job.name);
@@ -173,7 +192,8 @@ app.post('/api/folders', route(async (req, res) => {
 
 app.post('/api/jobs', route(async (req, res) => {
   const job = parseJob(req.body);
-  await validateJobPaths(job, roots);
+  if (job.operation === 'duplicates') await browseDirectories(roots.sources, job.sources[0]);
+  else await validateJobPaths(job, roots);
   storage.jobs.push(job);
   await storage.saveJobs();
   scheduleJob(job);
@@ -185,7 +205,9 @@ app.put('/api/jobs/:id', route(async (req, res) => {
   if (!previous) { res.status(404).json({ error: 'Tâche introuvable' }); return; }
   if (active?.jobId === previous.id) { res.status(409).json({ error: 'Tâche en cours de synchronisation' }); return; }
   const job = parseJob(req.body, previous);
-  await validateJobPaths(job, roots);
+  if (job.operation === 'duplicates') await browseDirectories(roots.sources, job.sources[0]);
+  else await validateJobPaths(job, roots);
+  duplicateResults.delete(job.id);
   storage.jobs[storage.jobs.findIndex(item => item.id === previous.id)] = job;
   await storage.saveJobs();
   scheduleJob(job);
@@ -198,6 +220,7 @@ app.delete('/api/jobs/:id', route(async (req, res) => {
   if (active?.jobId === job.id) { res.status(409).json({ error: 'Tâche en cours de synchronisation' }); return; }
   schedules.get(job.id)?.stop();
   schedules.delete(job.id);
+  duplicateResults.delete(job.id);
   storage.jobs = storage.jobs.filter(item => item.id !== job.id);
   await storage.saveJobs();
   res.status(204).end();
@@ -211,9 +234,35 @@ app.get('/api/jobs/:id/runs', route(async (req, res) => {
 app.post('/api/jobs/:id/run', route(async (req, res) => {
   const job = jobById(req.params.id);
   if (!job) { res.status(404).json({ error: 'Tâche introuvable' }); return; }
-  if (active) { res.status(409).json({ error: 'Une autre synchronisation est déjà en cours.' }); return; }
-  const dryRun = req.body?.dryRun === true;
+  if (active || deletingDuplicates) { res.status(409).json({ error: 'Une autre opération est déjà en cours.' }); return; }
+  const dryRun = job.operation === 'duplicates' ? true : req.body?.dryRun === true;
   res.status(202).json({ run: launch(job, dryRun) });
+}));
+
+app.get('/api/jobs/:id/duplicates', (req, res) => {
+  const job = jobById(req.params.id);
+  if (!job || job.operation !== 'duplicates') { res.status(404).json({ error: 'Recherche introuvable.' }); return; }
+  res.json({ scan: duplicateResults.get(job.id) ?? null });
+});
+
+app.post('/api/jobs/:id/duplicates/delete', route(async (req, res) => {
+  const job = jobById(req.params.id);
+  if (!job || job.operation !== 'duplicates') { res.status(404).json({ error: 'Recherche introuvable.' }); return; }
+  if (active || deletingDuplicates) { res.status(409).json({ error: 'Une opération est déjà en cours.' }); return; }
+  const scan = duplicateResults.get(job.id);
+  if (!scan || !req.body || req.body.scanId !== scan.scanId) {
+    throw new ValidationError('Analyse périmée ou absente : relancer la recherche.');
+  }
+  const selections = req.body.selections as DuplicateSelection[];
+  deletingDuplicates = true;
+  try {
+    const result = await deleteDuplicates(scan, selections, roots);
+    // Findings are intentionally short-lived; rescan to inspect the new state.
+    duplicateResults.delete(job.id);
+    res.json(result);
+  } finally {
+    deletingDuplicates = false;
+  }
 }));
 
 app.post('/api/jobs/:id/pause', (req, res) => {

@@ -147,5 +147,42 @@ INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
   -o /dev/null -w '%{http_code}' \
   "http://127.0.0.1:18080/api/jobs/$DUPLICATES_ID/duplicates/delete")
 [[ "$INVALID" == 400 ]] || { echo "Expected stale-scan deletion rejection 400, got $INVALID" >&2; exit 1; }
-echo 'Docker smoke test passed (auth, transfers, filters, duplicate scan and deletion safeguards).'
+# Live Photos: exclude Apple metadata-marked video, retain ordinary short MOV.
+mkdir -p "$WORK/source/LivePhotos"
+node - "$WORK/source/LivePhotos" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const base = process.argv[2];
+const atom = (type, data) => {
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(8 + data.length);
+  header.write(type, 4);
+  return Buffer.concat([header, data]);
+};
+fs.writeFileSync(path.join(base, 'paired.MOV'),
+  atom('moov', Buffer.from('com.apple.quicktime.still-image-time')));
+fs.writeFileSync(path.join(base, 'ordinary.MOV'),
+  atom('moov', Buffer.from('com.apple.quicktime.creationdate')));
+NODE
+RESPONSE=$(curl -fsS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"Video without live photos","sources":["/volume1/OneDrive/LivePhotos"],"destination":"/volumeUSB1/usbshare/VideosOnly","extensions":["mov"],"excludeLivePhotos":true}' \
+  http://127.0.0.1:18080/api/jobs)
+LIVE_PHOTO_JOB=$(node -p 'JSON.parse(process.argv[1]).job.id' "$RESPONSE")
+curl -fsS -u "$AUTH" -H 'Content-Type: application/json' -d '{"dryRun":false}' \
+  "http://127.0.0.1:18080/api/jobs/$LIVE_PHOTO_JOB/run" >/dev/null
+FINISHED=0
+for _ in $(seq 1 40); do
+  STATUS=$(curl -fsS -u "$AUTH" http://127.0.0.1:18080/api/status)
+  if [[ "$STATUS" == *'"active":null'* ]]; then FINISHED=1; break; fi
+  sleep 1
+done
+[[ "$FINISHED" == 1 ]] || { echo 'Live Photo sync timeout' >&2; exit 1; }
+[[ -f "$WORK/destination/VideosOnly/ordinary.MOV" ]] || { echo 'Regular short video was excluded' >&2; exit 1; }
+[[ ! -e "$WORK/destination/VideosOnly/paired.MOV" ]] || { echo 'Live Photo movie was copied' >&2; exit 1; }
+LIVE_PHOTO_RUNS=$(curl -fsS -u "$AUTH" "http://127.0.0.1:18080/api/jobs/$LIVE_PHOTO_JOB/runs")
+[[ "$LIVE_PHOTO_RUNS" == *'"livePhotosExcluded":1'* ]] || {
+  echo "Expected one excluded Live Photo movie: $LIVE_PHOTO_RUNS" >&2; exit 1;
+}
+echo 'Docker smoke test passed (auth, transfers, filters, Live Photo exclusion, duplicate scan).'
+
 

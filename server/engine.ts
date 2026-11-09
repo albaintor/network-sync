@@ -21,7 +21,6 @@ interface FileTask {
   size: number;
   mtimeMs: number;
   dev: number;
-  ino: number;
 }
 
 interface Occupant {
@@ -73,8 +72,7 @@ async function* walk(
         relativePath: path.relative(base, filename),
         size: info.size,
         mtimeMs: info.mtimeMs,
-        dev: info.dev,
-        ino: info.ino
+        dev: info.dev
       };
     }
   }

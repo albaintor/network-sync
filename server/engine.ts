@@ -215,7 +215,7 @@ function reportError(progress: RunProgress, error: unknown, file?: string): void
 
 export function newProgress(job: SyncJob, dryRun: boolean): RunProgress {
   return {
-    id: randomUUID(), jobId: job.id, jobName: job.name, dryRun,
+    id: randomUUID(), jobId: job.id, jobName: job.name, operation: job.operation ?? 'copy', dryRun,
     status: 'running', phase: 'scanning', startedAt: new Date().toISOString(),
     filesTotal: 0, bytesTotal: 0, processed: 0, bytesCopied: 0,
     copied: 0, moved: 0, skipped: 0, excluded: 0, renamed: 0, overwritten: 0, errors: 0,

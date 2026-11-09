@@ -386,3 +386,42 @@ test('move rejects overlapping source paths before writing or removing anything'
   assert.equal(await readFile(path.join(first, 'nested/photo.jpg'), 'utf8'), 'photo');
   await assert.rejects(readdir(destination), { code: 'ENOENT' });
 });
+
+
+test('move with overwrite replaces the target before deleting the source', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.operation = 'move';
+  job.conflictPolicy = 'overwrite';
+  await put(first, 'old.txt', 'NEW');
+  await put(destination, 'old.txt', 'OLD');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.overwritten, 1);
+  assert.equal(result.moved, 1);
+  assert.equal(await readFile(path.join(destination, 'old.txt'), 'utf8'), 'NEW');
+  await assert.rejects(readFile(path.join(first, 'old.txt')), { code: 'ENOENT' });
+});
+
+test('move retains a source changed after scanning, without publishing it', async () => {
+  const { first, destination, roots, job, put } = await setup();
+  const { PauseGate } = await import('./pause.js');
+  job.operation = 'move';
+  await put(first, 'changing.txt', 'original');
+  const gate = new PauseGate();
+  const progress = newProgress(job, false);
+  const promise = executeSync(job, progress, roots, new AbortController().signal, () => {
+    if (progress.phase === 'copying' && !gate.isPaused && progress.processed === 0) gate.pause();
+  }, gate);
+  for (let i = 0; i < 500 && !gate.isPaused; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(gate.isPaused, true);
+  await writeFile(path.join(first, 'changing.txt'), 'different contents');
+  gate.resume();
+  await promise;
+  assert.equal(progress.status, 'completed_with_errors');
+  assert.equal(progress.errors, 1);
+  assert.equal(progress.moved, 0);
+  assert.equal(await readFile(path.join(first, 'changing.txt'), 'utf8'), 'different contents');
+  await assert.rejects(readFile(path.join(destination, 'changing.txt')), { code: 'ENOENT' });
+});

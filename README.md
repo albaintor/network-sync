@@ -117,7 +117,7 @@ Les volumes accessibles se déclarent **une fois dans Docker** (par défaut `/vo
 Deux options indépendantes sont enregistrées pour chaque tâche :
 
 - **Opération** : `copy` (valeur par défaut) conserve les fichiers sources ; `move` copie le fichier à destination, vérifie par **SHA-256** qu'il est identique, puis supprime le fichier source. Les sous-dossiers sources vides sont retirés, mais pas la racine source.
-- **Organisation** : `tree` (valeur par défaut) utilise le chemin relatif à chaque source (ex. `2026/01/photo.jpg`) ; `flat` conserve uniquement le nom du fichier (`photo.jpg`) à la racine de destination. Les collisions suivent les règles habituelles : renommer, ignorer ou écraser.
+- **Organisation** : `tree` (valeur par défaut) utilise le chemin relatif à chaque source (ex. `2026/01/photo.jpg`) ; `flat` conserve uniquement le nom du fichier (`photo.jpg`) à la racine de destination. Les collisions suivent les règles habituelles : renommer, ignorer ou écraser. En mode copie à plat, sélectionner SHA-256 pour distinguer deux fichiers différents ayant la même taille.
 
 En mode déplacement, un fichier déjà présent et réellement identique est supprimé de sa source après vérification SHA-256, sans être recopié. Un fichier différent ignoré par la politique de conflit **reste à la source**. L'option « comparer par taille » peut rester sélectionnée pour la copie ; **le déplacement vérifie toujours le contenu pour autoriser une suppression**, même si la comparaison par taille a été choisie. Les fichiers exclus par les filtres ne sont jamais déplacés.
 

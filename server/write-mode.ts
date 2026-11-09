@@ -25,7 +25,7 @@ function mountIsExfat(directory: string, mountinfo: string): boolean {
     if (!mount || (full !== mount && !full.startsWith(mount.endsWith('/') ? mount : mount + '/'))) continue;
     if (mount.length < longest) continue;
     longest = mount.length;
-    detected = /^(?:exfat|exfat-fuse|fuse\\.exfat(?:-fuse)?)$/i.test(right[0] ?? '');
+    detected = /^(?:exfat|exfat-fuse|fuse\.exfat(?:-fuse)?)$/i.test(right[0] ?? '');
   }
   return detected;
 }

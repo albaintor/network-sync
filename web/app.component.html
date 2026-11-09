@@ -192,7 +192,40 @@
               <div class="progress-heading"><strong>{{ progress.dryRun ? 'Simulation' : 'Synchronisation' }} · {{ progress.status === 'paused' ? 'En pause' : progress.phase === 'scanning' ? 'Analyse des sources' : job.operation === 'move' ? 'Déplacement des fichiers' : 'Copie des fichiers' }}</strong><span>{{ percentage(progress) }} %</span></div>
               <div class="progress-track"><div class="progress-fill" [style.width.%]="percentage(progress)"></div></div>
               <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à transférer' : 'transférés' }} · @if (job.operation === 'move') { {{ progress.moved ?? 0 }} {{ progress.dryRun ? 'à supprimer à la source' : 'supprimés à la source' }} · } {{ progress.skipped }} ignorés · {{ progress.excluded ?? 0 }} exclus · {{ progress.errors }} erreurs</span></div>
-              @if (progress.currentFile) { <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p> }
+              @if (!progress.dryRun && progress.phase !== 'scanning') {
+                <div class="transfer-metrics">
+                  <div class="transfer-metric">
+                    <small>Volume copié / estimé</small>
+                    <strong>{{ formatBytes(progress.bytesTransferred ?? progress.bytesCopied) }} / {{ formatBytes(progress.bytesToTransfer ?? progress.bytesTotal) }}</strong>
+                  </div>
+                  <div class="transfer-metric">
+                    <small>Temps de transfert écoulé</small>
+                    <strong>{{ durationSince(progress.transferStartedAt) }}</strong>
+                  </div>
+                  <div class="transfer-metric">
+                    <small>Débit mesuré</small>
+                    @if (transferSpeed(progress); as speed) {
+                      <strong>{{ formatBytes(speed) }}/s</strong>
+                    } @else {
+                      <strong>{{ progress.status === 'paused' ? 'En pause' : 'Calcul en cours…' }}</strong>
+                    }
+                  </div>
+                  <div class="transfer-metric">
+                    <small>Temps restant estimé</small>
+                    <strong>{{ formatDuration(transferEta(progress)) }}</strong>
+                  </div>
+                </div>
+                <div class="progress-track transfer-bytes-track"><div class="progress-fill" [style.width.%]="bytePercentage(progress)"></div></div>
+                <p class="helper transfer-estimate-note">Estimation selon le débit de copie observé. Elle se recalcule lorsque des fichiers sont ignorés ou que le débit évolue ; les comparaisons SHA-256 et la publication peuvent ajouter du temps. Durée écoulée pauses incluses.</p>
+              }
+              @if (progress.currentFile) {
+                <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p>
+                @if (progress.currentFileSize; as fileSize) {
+                  @if (!progress.dryRun) {
+                    <p class="helper">Fichier actuel : {{ formatBytes(progress.currentFileBytes ?? 0) }} / {{ formatBytes(fileSize) }}</p>
+                  }
+                }
+              }
             </div>
           }
         </section>
@@ -216,7 +249,7 @@
                   <div class="history-detail">
                     <p>
                       @if (run.operation === 'duplicates') { {{ run.filesTotal }} fichiers parcourus · {{ run.candidateFiles ?? 0 }} candidats SHA-256 · {{ run.duplicateGroups ?? 0 }} groupes · {{ run.errors }} erreurs }
-                      @else { {{ run.processed }} / {{ run.filesTotal }} fichiers analysés · {{ formatBytes(run.bytesCopied) }} transférés · {{ run.overwritten }} remplacés · {{ run.excluded ?? 0 }} exclus · {{ run.errors }} erreurs }
+                      @else { {{ run.processed }} / {{ run.filesTotal }} fichiers analysés · {{ formatBytes(run.bytesCopied) }} transférés · {{ run.overwritten }} remplacés · {{ run.excluded ?? 0 }} exclus · {{ run.errors }} erreurs · Durée : {{ durationSince(run.transferStartedAt ?? run.startedAt, run.finishedAt) }} }
                     </p>
                     @for (message of run.errorMessages; track $index) { <p class="error-line">{{ message }}</p> }
                   </div>

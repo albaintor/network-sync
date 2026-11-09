@@ -37,6 +37,9 @@ interface Run {
   operation?: TransferMode;
   phase: string; dryRun: boolean; startedAt: string; finishedAt?: string;
   filesTotal: number; candidateFiles?: number; duplicateGroups?: number; bytesTotal: number; processed: number;
+  bytesToTransfer?: number; bytesTransferred?: number; currentFileBytes?: number; currentFileSize?: number | null;
+  transferStartedAt?: string; transferSpeedBytesPerSec?: number | null;
+  transferEtaSeconds?: number | null; lastTransferAtMs?: number;
   bytesCopied: number; copied: number; moved?: number; skipped: number; excluded?: number; renamed: number;
   overwritten: number; errors: number; errorMessages: string[]; currentFile: string | null;
 }
@@ -531,5 +534,34 @@ export class AppComponent implements OnInit, OnDestroy {
   percentage(run: Run): number {
     const total = run.operation === 'duplicates' ? (run.candidateFiles ?? 0) : run.filesTotal;
     return total ? Math.round(100 * run.processed / total) : 0;
+  }
+  bytePercentage(run: Run): number {
+    const total = run.bytesToTransfer ?? run.bytesTotal;
+    const done = run.bytesTransferred ?? run.bytesCopied;
+    return total > 0 ? Math.min(100, Math.round(done * 100 / total)) : 100;
+  }
+  transferSpeed(run: Run): number | null {
+    if (run.dryRun || run.status !== 'running' || run.phase !== 'copying' ||
+        !run.lastTransferAtMs || Date.now() - run.lastTransferAtMs > 12_000) return null;
+    const value = run.transferSpeedBytesPerSec;
+    return value && Number.isFinite(value) && value > 0 ? value : null;
+  }
+  transferEta(run: Run): number | null {
+    return this.transferSpeed(run) === null ? null : (run.transferEtaSeconds ?? null);
+  }
+  formatDuration(seconds: number | null): string {
+    if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return '—';
+    const value = Math.ceil(seconds);
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor(value % 3600 / 60);
+    const secs = value % 60;
+    return (hours ? hours + ' h ' : '') + (hours || minutes ? minutes + ' min ' : '') + secs + ' s';
+  }
+  durationSince(start: string | undefined, end?: string): string {
+    if (!start) return '—';
+    const startMs = new Date(start).getTime();
+    const endMs = end ? new Date(end).getTime() : Date.now();
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '—';
+    return this.formatDuration(Math.max(0, (endMs - startMs) / 1000));
   }
 }

@@ -9,6 +9,7 @@ import { destinationRootFor, ensureDestinationDirectory, isInside, validateJobPa
 import { compileFilenameRegex, matchesFileFilters } from './filters.js';
 import { PauseGate } from './pause.js';
 import { publishWithoutOverwrite } from './publish.js';
+import { TransferMeter } from './transfer-meter.js';
 
 interface FileTask {
   sourceRoot: string;
@@ -166,7 +167,10 @@ async function removeMovedSource(
 // Write to a sibling temp file, then publish without clobbering existing names.
 // The hard-link fast path is atomic. On USB filesystems that reject links,
 // an exclusive second copy is used, which can be briefly visible before completion.
-async function copyAtomic(task: FileTask, target: string, overwrite: boolean, signal: AbortSignal, gate: PauseGate): Promise<void> {
+async function copyAtomic(
+  task: FileTask, target: string, overwrite: boolean, signal: AbortSignal, gate: PauseGate,
+  onBytes: (size: number) => void = () => {}
+): Promise<void> {
   const temp = path.join(path.dirname(target), '.network-sync-' + randomUUID() + '.tmp');
   try {
     aborted(signal);
@@ -181,7 +185,7 @@ async function copyAtomic(task: FileTask, target: string, overwrite: boolean, si
     const pauseStream = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         void gate.wait(signal).then(
-          () => callback(null, chunk),
+          () => { onBytes(chunk.length); callback(null, chunk); },
           error => callback(error instanceof Error ? error : new Error(String(error)))
         );
       }
@@ -248,6 +252,7 @@ export async function executeSync(
   onUpdate: () => void = () => {},
   gate: PauseGate = new PauseGate()
 ): Promise<void> {
+  let meter: TransferMeter | null = null;
   try {
     await validateJobPaths(job, roots);
     const destinationRoot = await destinationRootFor(job.destination, roots);
@@ -265,11 +270,14 @@ export async function executeSync(
     }
 
     progress.phase = 'copying';
+    meter = !progress.dryRun ? new TransferMeter(progress, onUpdate) : null;
+    meter?.begin();
     onUpdate();
     const planned = new Map<string, FileTask>();
     for (const task of tasks) {
       await gate.wait(signal);
       progress.currentFile = task.sourcePath;
+      let accountedForTask = false;
       try {
         const relativeTarget = job.layout === 'flat' ? path.basename(task.relativePath) : task.relativePath;
         const original = path.join(job.destination, relativeTarget);
@@ -315,6 +323,8 @@ export async function executeSync(
 
         if (action === 'skip' || action === 'same') {
           progress.skipped++;
+          meter?.skip(task.size);
+          accountedForTask = true;
           // Identical destination: moving removes only the verified duplicate.
           // Conflict-policy skips always leave their source untouched.
           if (action === 'same' && job.operation === 'move') {
@@ -323,18 +333,25 @@ export async function executeSync(
           }
         } else {
           await ensureDestinationDirectory(destinationRoot, path.dirname(target), !progress.dryRun);
-          if (!progress.dryRun) await copyAtomic(task, target, action === 'overwrite', signal, gate);
-          else planned.set(target, task);
+          if (!progress.dryRun) {
+            meter?.beginFile(task.size);
+            await copyAtomic(task, target, action === 'overwrite', signal, gate, bytes => meter?.chunk(bytes));
+            progress.bytesCopied += task.size;
+            meter?.completeFile();
+          } else {
+            planned.set(target, task);
+          }
+          accountedForTask = true;
           progress.copied++;
           if (action === 'rename') progress.renamed++;
           if (action === 'overwrite') progress.overwritten++;
-          if (!progress.dryRun) progress.bytesCopied += task.size;
           if (job.operation === 'move') {
             if (!progress.dryRun) await removeMovedSource(task, target, job.destination, signal, gate);
             progress.moved = (progress.moved ?? 0) + 1;
           }
         }
       } catch (error) {
+        if (!accountedForTask) meter?.fail(task.size);
         if (signal.aborted) throw error;
         reportError(progress, error, task.sourcePath);
       } finally {
@@ -351,8 +368,12 @@ export async function executeSync(
       progress.status = 'failed';
     }
   } finally {
+    meter?.finish();
     progress.phase = 'finished';
     progress.currentFile = null;
+    progress.currentFileBytes = 0;
+    progress.currentFileSize = null;
+    progress.transferEtaSeconds = null;
     progress.finishedAt = new Date().toISOString();
     onUpdate();
   }

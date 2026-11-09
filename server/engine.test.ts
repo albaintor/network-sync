@@ -425,3 +425,56 @@ test('move retains a source changed after scanning, without publishing it', asyn
   assert.equal(await readFile(path.join(first, 'changing.txt'), 'utf8'), 'different contents');
   await assert.rejects(readFile(path.join(destination, 'changing.txt')), { code: 'ENOENT' });
 });
+
+
+test('transfer telemetry uses copied bytes and excludes skipped collisions from ETA total', async () => {
+  const { first, second, job, roots, put } = await setup();
+  await put(first, 'movie.mkv', 'ABC');
+  await put(second, 'movie.mkv', 'ABC');
+  const progress = newProgress(job, false);
+  let streamedDuringFile = false;
+  await executeSync(job, progress, roots, new AbortController().signal, () => {
+    if (progress.phase === 'copying' && progress.currentFileBytes && progress.processed === 0) {
+      streamedDuringFile = true;
+    }
+  });
+  assert.equal(progress.status, 'completed');
+  assert.equal(progress.bytesTotal, 6);
+  assert.equal(progress.bytesToTransfer, 3);
+  assert.equal(progress.bytesCopied, 3);
+  assert.equal(progress.bytesTransferred, 3);
+  assert.equal(progress.skipped, 1);
+  assert.equal(progress.transferEtaSeconds, null);
+  assert.ok(progress.transferStartedAt);
+  assert.equal(streamedDuringFile, true, 'progress must change during an in-progress file');
+});
+
+test('transfer telemetry never predicts transfer speed in a dry run', async () => {
+  const { first, job, roots, put } = await setup();
+  await put(first, 'photo.jpg', '123456');
+  const progress = newProgress(job, true);
+  await executeSync(job, progress, roots, new AbortController().signal);
+  assert.equal(progress.status, 'completed');
+  assert.equal(progress.bytesTotal, 6);
+  assert.equal(progress.transferSpeedBytesPerSec, undefined);
+  assert.equal(progress.transferEtaSeconds, null);
+  assert.equal(progress.bytesTransferred, undefined);
+});
+
+test('cancelled copy does not retain uncommitted bytes as transferred', async () => {
+  const { first, job, roots, put } = await setup();
+  const controller = new AbortController();
+  await put(first, 'large.bin', 'A'.repeat(1_000_000));
+  const progress = newProgress(job, false);
+  let aborted = false;
+  await executeSync(job, progress, roots, controller.signal, () => {
+    if (progress.phase === 'copying' && (progress.currentFileBytes ?? 0) > 0 && !aborted) {
+      aborted = true;
+      controller.abort();
+    }
+  });
+  assert.equal(progress.status, 'cancelled');
+  assert.equal(progress.bytesTransferred, progress.bytesCopied);
+  assert.equal(progress.currentFileBytes, 0);
+  assert.equal(progress.transferEtaSeconds, null);
+});

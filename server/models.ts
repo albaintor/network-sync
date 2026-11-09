@@ -38,6 +38,7 @@ export interface RunProgress {
   id: string;
   jobId: string;
   jobName: string;
+  operation?: TransferMode;
   dryRun: boolean;
   status: RunStatus;
   phase: 'scanning' | 'copying' | 'finished';

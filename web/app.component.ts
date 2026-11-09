@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 
 type ConflictPolicy = 'rename' | 'skip' | 'overwrite';
 type CompareMode = 'size' | 'sha256';
-type TransferMode = 'copy' | 'move';
+type TransferMode = 'copy' | 'move' | 'duplicates';
 type DestinationLayout = 'tree' | 'flat';
 type SizeFilterMode = 'none' | 'gt' | 'lt';
 interface SizeFilter { operator: 'gt' | 'lt'; megabytes: number; }
@@ -28,11 +28,15 @@ interface JobForm {
   filenameRegex: string;
   filenameRegexIgnoreCase: boolean;
 }
+interface DuplicateFile { path: string; size: number; }
+interface DuplicateGroup { id: string; size: number; sha256: string; files: DuplicateFile[]; }
+interface DuplicateScan { scanId: string; directory: string; groups: DuplicateGroup[]; createdAt: string; readOnly: boolean; }
+interface DuplicateDeleteResult { deleted: number; freedBytes: number; errors: string[]; }
 interface Run {
   id: string; jobId: string; jobName: string; status: string;
   operation?: TransferMode;
   phase: string; dryRun: boolean; startedAt: string; finishedAt?: string;
-  filesTotal: number; bytesTotal: number; processed: number;
+  filesTotal: number; candidateFiles?: number; duplicateGroups?: number; bytesTotal: number; processed: number;
   bytesCopied: number; copied: number; moved?: number; skipped: number; excluded?: number; renamed: number;
   overwritten: number; errors: number; errorMessages: string[]; currentFile: string | null;
 }
@@ -50,6 +54,11 @@ export class AppComponent implements OnInit, OnDestroy {
   selectedId: string | null = null;
   active: Run | null = null;
   history: Run[] = [];
+  duplicateScan: DuplicateScan | null = null;
+  duplicateKeep: Record<string, string> = {};
+  duplicateSelected: Record<string, boolean> = {};
+  deletingDuplicates = false;
+  duplicateNotice = '';
   error = '';
   loading = true;
   saving = false;
@@ -127,6 +136,7 @@ export class AppComponent implements OnInit, OnDestroy {
         }
         this.loading = false;
         this.loadHistory();
+        this.loadDuplicateResults();
       },
       error: e => { this.loading = false; this.showError(e); }
     });
@@ -136,11 +146,11 @@ export class AppComponent implements OnInit, OnDestroy {
       next: data => {
         const wasRunning = this.active !== null;
         this.active = data.active;
-        if (wasRunning && !this.active) this.loadHistory();
+        if (wasRunning && !this.active) { this.loadHistory(); this.loadDuplicateResults(); }
       }
     });
   }
-  select(job: Job): void { this.selectedId = job.id; this.loadHistory(); }
+  select(job: Job): void { this.selectedId = job.id; this.duplicateNotice = ''; this.loadHistory(); this.loadDuplicateResults(); }
   loadHistory(): void {
     const id = this.selectedId;
     if (!id) { this.history = []; return; }
@@ -166,6 +176,81 @@ export class AppComponent implements OnInit, OnDestroy {
       : this.blankForm();
     this.formVisible = true;
   }
+  setOperation(operation: TransferMode): void {
+    this.form.operation = operation;
+    if (operation === 'duplicates') {
+      this.form.sources = [this.form.sources[0] ?? ''];
+      this.form.cron = '';
+    }
+    this.formError = '';
+  }
+
+  loadDuplicateResults(): void {
+    const job = this.selected;
+    if (!job || job.operation !== 'duplicates') {
+      this.duplicateScan = null;
+      return;
+    }
+    const id = job.id;
+    this.http.get<{ scan: DuplicateScan | null }>('/api/jobs/' + encodeURIComponent(id) + '/duplicates').subscribe({
+      next: data => {
+        if (this.selectedId !== id) return;
+        this.duplicateScan = data.scan;
+        this.duplicateKeep = {};
+        this.duplicateSelected = {};
+        for (const group of data.scan?.groups ?? []) {
+          // Preselect one copy to KEEP; deletion of other copies is never automatic.
+          this.duplicateKeep[group.id] = group.files[0].path;
+          this.duplicateSelected[group.id] = false;
+        }
+      },
+      error: e => this.showError(e)
+    });
+  }
+
+  selectAllDuplicateGroups(checked: boolean): void {
+    for (const group of this.duplicateScan?.groups ?? []) this.duplicateSelected[group.id] = checked;
+  }
+
+  duplicateDeleteCount(): number {
+    return (this.duplicateScan?.groups ?? []).reduce(
+      (total, group) => total + (this.duplicateSelected[group.id] ? group.files.length - 1 : 0), 0);
+  }
+
+  duplicateDeleteSize(): number {
+    return (this.duplicateScan?.groups ?? []).reduce(
+      (total, group) => total + (this.duplicateSelected[group.id] ? (group.files.length - 1) * group.size : 0), 0);
+  }
+
+  deleteSelectedDuplicates(job: Job): void {
+    const scan = this.duplicateScan;
+    if (!scan || scan.readOnly || this.deletingDuplicates || this.active) return;
+    const selections = scan.groups
+      .filter(group => this.duplicateSelected[group.id])
+      .map(group => ({ groupId: group.id, keep: this.duplicateKeep[group.id] }));
+    if (!selections.length || selections.some(x => !x.keep)) return;
+    const count = this.duplicateDeleteCount();
+    if (!confirm('Supprimer DÉFINITIVEMENT ' + count + ' fichier(s) (' +
+      this.formatBytes(this.duplicateDeleteSize()) + ') dans « ' + scan.directory +
+      ' » ? Une copie désignée sera conservée par groupe. Cette opération est irréversible.')) return;
+    this.deletingDuplicates = true;
+    this.duplicateNotice = '';
+    this.http.post<DuplicateDeleteResult>(
+      '/api/jobs/' + encodeURIComponent(job.id) + '/duplicates/delete',
+      { scanId: scan.scanId, selections }
+    ).subscribe({
+      next: result => {
+        this.deletingDuplicates = false;
+        this.duplicateScan = null;
+        this.duplicateNotice = result.deleted + ' fichier(s) supprimé(s), ' +
+          this.formatBytes(result.freedBytes) + ' libérés théoriquement.' +
+          (result.errors.length ? ' Erreurs : ' + result.errors.join(' | ') : '') +
+          ' Relancez l’analyse pour actualiser les résultats.';
+      },
+      error: e => { this.deletingDuplicates = false; this.showError(e); }
+    });
+  }
+
   sizeFilterMode(): SizeFilterMode {
     return this.form.sizeFilter?.operator ?? 'none';
   }
@@ -243,31 +328,37 @@ export class AppComponent implements OnInit, OnDestroy {
   save(): void {
     if (this.saving) return;
     this.formError = '';
-    if (!this.form.name.trim() || this.form.sources.some(x => !x.trim()) || !this.form.destination.trim()) {
-      this.formError = 'Veuillez renseigner le nom, toutes les sources et la destination.';
+    if (!this.form.name.trim() || this.form.sources.some(x => !x.trim()) ||
+        (this.form.operation !== 'duplicates' && !this.form.destination.trim())) {
+      this.formError = 'Veuillez renseigner le nom et les dossiers requis.';
       return;
     }
-    if (this.form.extensions !== null && !this.form.extensions.length) {
+    if (this.form.operation === 'duplicates' && this.form.sources.length !== 1) {
+      this.formError = 'Sélectionnez un seul dossier à analyser.';
+      return;
+    }
+    if (this.form.operation !== 'duplicates' && this.form.extensions !== null && !this.form.extensions.length) {
       this.formError = 'Sélectionnez au moins une extension, ou choisissez « Tous les fichiers ».';
       return;
     }
-    if (this.extensionDraft.trim() && this.form.extensions !== null) {
+    if (this.form.operation !== 'duplicates' && this.extensionDraft.trim() && this.form.extensions !== null) {
       this.formError = 'Cliquez sur « Ajouter » pour prendre en compte les extensions personnalisées.';
       return;
     }
-    if (this.form.sizeFilter &&
+    if (this.form.operation !== 'duplicates' && this.form.sizeFilter &&
         (!Number.isFinite(this.form.sizeFilter.megabytes) ||
           this.form.sizeFilter.megabytes < 0 || this.form.sizeFilter.megabytes > 100_000_000)) {
       this.formError = 'Saisissez un seuil valide entre 0 et 100 000 000 Mo.';
       return;
     }
-    if (this.form.filenameRegex.trim().length > 200) {
+    if (this.form.operation !== 'duplicates' && this.form.filenameRegex.trim().length > 200) {
       this.formError = 'La regex doit contenir au maximum 200 caractères.';
       return;
     }
     this.saving = true;
     const body = { ...this.form, sources: this.form.sources.map(x => x.trim()),
-      destination: this.form.destination.trim(), cron: this.form.cron.trim() || null,
+      destination: this.form.operation === 'duplicates' ? '' : this.form.destination.trim(),
+      cron: this.form.operation === 'duplicates' ? null : (this.form.cron.trim() || null),
       filenameRegex: this.form.filenameRegex.trim() || null };
     const id = this.editingId;
     const request = id ? this.http.put<{ job: Job }>('/api/jobs/' + id, body)
@@ -291,7 +382,11 @@ export class AppComponent implements OnInit, OnDestroy {
         !confirm('Déplacer les fichiers de « ' + job.name + ' » ? Les sources seront supprimées après vérification SHA-256 de leur copie.')) return;
     this.error = '';
     this.http.post<{ run: Run }>('/api/jobs/' + job.id + '/run', { dryRun }).subscribe({
-      next: data => { this.active = data.run; this.selectedId = job.id; },
+      next: data => {
+        this.active = data.run;
+        this.selectedId = job.id;
+        if (job.operation === 'duplicates') { this.duplicateScan = null; this.duplicateNotice = ''; }
+      },
       error: e => this.showError(e)
     });
   }
@@ -372,6 +467,12 @@ export class AppComponent implements OnInit, OnDestroy {
     }
 
     if (this.browseKind !== 'source') return;
+    if (this.form.operation === 'duplicates') {
+      this.form.sources = [chosen];
+      this.browseKind = null;
+      this.browseIndex = -1;
+      return;
+    }
     const index = this.browseIndex >= 0
       ? this.browseIndex : this.form.sources.findIndex(x => !x.trim());
     if (this.form.sources.some((x, i) => x === chosen && i !== index)) {
@@ -428,6 +529,7 @@ export class AppComponent implements OnInit, OnDestroy {
       overwrite: 'Remplacer les conflits' })[value];
   }
   percentage(run: Run): number {
-    return run.filesTotal ? Math.round(100 * run.processed / run.filesTotal) : 0;
+    const total = run.operation === 'duplicates' ? (run.candidateFiles ?? 0) : run.filesTotal;
+    return total ? Math.round(100 * run.processed / total) : 0;
   }
 }

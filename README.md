@@ -1,6 +1,6 @@
 # Network Sync
 
-Network Sync est une application de transfert **unidirectionnel** des dossiers d'un NAS. Elle fusionne plusieurs sources vers une destination unique, en mode **copie (par défaut)** ou **déplacement**, avec arborescence conservée ou destination à plat. Elle expose un tableau de bord Angular via Node.js/Express.
+Network Sync est une application de transfert **unidirectionnel** des dossiers d'un NAS. Elle fusionne plusieurs sources vers une destination unique, en mode **copie (par défaut)** ou **déplacement**, avec arborescence conservée ou destination à plat. Un troisième type d'opération recherche les doublons de contenu dans un répertoire. Elle expose un tableau de bord Angular via Node.js/Express.
 
 ## Fonctionnalités
 
@@ -11,7 +11,8 @@ Network Sync est une application de transfert **unidirectionnel** des dossiers d
 - Destination avec **arborescence relative conservée** (par défaut) ou **fichiers à plat**, directement à la racine.
 - Opération **copier** (défaut, conserve les sources) ou **déplacer** (supprime les fichiers sources après copie et vérification SHA-256).
 - Conflits paramétrables : **renommer** (par défaut), **ignorer**, **écraser**.
-- Mode par défaut : même chemin et même taille = fichier déjà présent. Mode optionnel SHA-256 pour différencier deux fichiers de même taille.
+- Comparaison des fichiers au même chemin : **nom et taille** par défaut, ou **SHA-256** en option pour distinguer deux fichiers de taille identique. En mode déplacement, SHA-256 est imposé avant toute suppression.
+- **Détection de doublons** : inventaire récursif d'un dossier, regroupement par taille puis SHA-256 ; revue des groupes avec choix du fichier à conserver et suppression manuelle des autres copies.
 - Renommage stable, par exemple `photo__0a6c2d8e13.jpg` : une exécution répétée ne produit pas de copies supplémentaires si le contenu n'a pas changé.
 - Exécution manuelle, simulation sans écriture, annulation, progression et historique des 30 dernières exécutions.
 - Planification cron facultative avec fuseau horaire (par défaut `Europe/Paris`).
@@ -125,6 +126,18 @@ En mode déplacement, un fichier déjà présent et réellement identique est su
 
 Les anciennes tâches sans `operation` ni `layout` restent en mode `copy` / `tree`.
 
+### Recherche et suppression manuelle des doublons
+
+1. Dans l'interface, choisir **Recherche de doublons** ou sélectionner le type d'opération **Détecter les doublons** lors de la création d'une tâche.
+2. Choisir **un seul dossier source** ; aucun dossier destination n'est nécessaire. L'analyse est manuelle et parcourt récursivement ses sous-dossiers.
+3. L'analyse répertorie les tailles, puis ne calcule l'empreinte **SHA-256 que pour les tailles présentes plusieurs fois**. Elle signale les fichiers au contenu strictement identique **quel que soit leur nom** ; deux fichiers de même taille mais de contenus différents ne sont pas des doublons. Les liens symboliques, `@eaDir` et `#recycle` sont ignorés. Les liens physiques vers les mêmes données ne sont pas proposés comme stockage récupérable.
+4. Les résultats affichent, pour chaque groupe, la taille, le SHA-256 et la liste des chemins complets. Le premier fichier est **présélectionné à conserver** (modifiable par un bouton radio). Cocher explicitement les groupes à nettoyer, puis cliquer sur **Supprimer les doublons sélectionnés**.
+5. Une boîte de confirmation indique le nombre de fichiers et l'espace récupérable théorique. Avant suppression, le serveur **vérifie de nouveau tous les fichiers d'un groupe**, y compris le fichier à conserver, par identité et SHA-256 ; en cas de changement, il **ne supprime aucun fichier de ce groupe**. Les suppressions peuvent être partielles si un autre groupe échoue ou si un incident survient pendant les suppressions : un bilan est affiché et une nouvelle analyse est nécessaire.
+
+**Sécurité :** aucune suppression n'est automatique à l'issue d'une analyse ni lors d'une planification. Les résultats comportant des erreurs sont consultables mais **non supprimables**. La confirmation ne traite que les groupes explicitement choisis ; le nom du fichier à conserver doit appartenir aux fichiers observés lors de cette analyse. Les résultats sont conservés **en mémoire** et disparaissent après redémarrage du conteneur, modification de la tâche ou suppression ; il faut alors relancer l'analyse. L'opération exige des droits d'écriture sur le dossier source. Une limite de 200 000 fichiers examinés par recherche évite une consommation de mémoire excessive.
+
+L'API expose `GET /api/jobs/:id/duplicates` (groupes et identifiant du scan) et `POST /api/jobs/:id/duplicates/delete` avec `{"scanId":"...","selections":[{"groupId":"...","keep":"/chemin/à/conserver"}]}`. Le serveur refuse les chemins et groupes étrangers aux résultats de l'analyse.
+
 ### Filtrage des extensions
 
 Chaque règle peut inclure **tous les fichiers** (par défaut, y compris les anciennes règles) ou **une sélection explicite d'extensions**. Dans la configuration, choisir « Filtrer par extension », puis cocher les groupes **Images**, **Vidéos** et **Documents**, sélectionner des extensions individuellement ou ajouter une extension personnalisée (sans ou avec son point). Les extensions sont normalisées en minuscules et le filtrage est insensible à la casse, y compris pour les noms `.JPG` ou `.MP4`. Une extension composée comme `tar.gz` est également acceptée. Les fichiers exclus ne sont pas copiés et figurent dans le compteur « exclus ». Les dossiers restent parcourus de manière récursive.
@@ -171,8 +184,8 @@ Node.js 22+, Angular 20, Express 4 :
     npm run build
     APP_USERNAME=admin APP_PASSWORD=motdepassefort123 npm start
 
-Les paramètres API `operation` (`copy` ou `move`) et `layout` (`tree` ou `flat`) sont facultatifs, avec `copy` et `tree` comme valeurs par défaut. `sizeFilter` (ex. `{"operator":"gt","megabytes":10}`), `filenameRegex` (ex. `"^IMG_[0-9]+\\.jpg$"`) et `filenameRegexIgnoreCase` restent facultatifs. Envoyer `null` pour désactiver un filtre. Les règles plus anciennes sont compatibles.
+Les paramètres API `operation` (`copy`, `move` ou `duplicates`) et `layout` (`tree` ou `flat`) sont facultatifs, avec `copy` et `tree` comme valeurs par défaut. `duplicates` utilise un seul dossier source, pas de destination et aucune planification. `sizeFilter` (ex. `{"operator":"gt","megabytes":10}`), `filenameRegex` (ex. `"^IMG_[0-9]+\\.jpg$"`) et `filenameRegexIgnoreCase` restent facultatifs. Envoyer `null` pour désactiver un filtre. Les règles plus anciennes sont compatibles.
 
-L'API comprend `/api/folders` (création sécurisée de dossiers dans le navigateur), `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/pause`, `/api/jobs/:id/resume`, `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
+L'API comprend `/api/folders` (création sécurisée de dossiers dans le navigateur), `/api/jobs` (CRUD), `/api/jobs/:id/run` (avec `{"dryRun":true}` optionnel), `/api/jobs/:id/pause`, `/api/jobs/:id/resume`, `/api/jobs/:id/cancel`, `/api/jobs/:id/runs`, `/api/jobs/:id/duplicates`, `/api/jobs/:id/duplicates/delete`, `/api/status`, `/api/settings`, `/api/browse` et `/api/health`. Toutes les routes hormis `/api/health` nécessitent une authentification.
 
 La configuration est stockée dans `data/jobs.json` ; l'historique se trouve dans `data/history/`.

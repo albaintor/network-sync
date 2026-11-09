@@ -1,6 +1,6 @@
 export type ConflictPolicy = 'rename' | 'skip' | 'overwrite';
 export type CompareMode = 'size' | 'sha256';
-export type TransferMode = 'copy' | 'move';
+export type TransferMode = 'copy' | 'move' | 'duplicates';
 export type DestinationLayout = 'tree' | 'flat';
 
 export interface SizeFilter {
@@ -41,10 +41,14 @@ export interface RunProgress {
   operation?: TransferMode;
   dryRun: boolean;
   status: RunStatus;
-  phase: 'scanning' | 'copying' | 'finished';
+  phase: 'scanning' | 'hashing' | 'copying' | 'finished';
   startedAt: string;
   finishedAt?: string;
   filesTotal: number;
+  /** Candidates sharing a size, subject to SHA-256 verification. */
+  candidateFiles?: number;
+  /** Groups confirmed by content hash. */
+  duplicateGroups?: number;
   bytesTotal: number;
   processed: number;
   bytesCopied: number;

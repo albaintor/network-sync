@@ -94,6 +94,9 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
   if (layout !== 'tree' && layout !== 'flat') throw new ValidationError('Organisation de destination inconnue.');
   const schedule = typeof obj.cron === 'string' ? obj.cron.trim() : '';
   if (schedule && !cron.validate(schedule)) throw new ValidationError('Expression cron invalide.');
+  if (obj.excludeLivePhotos !== undefined && typeof obj.excludeLivePhotos !== 'boolean') {
+    throw new ValidationError('Le filtre Live Photos doit être booléen.');
+  }
   if (obj.enabled !== undefined && typeof obj.enabled !== 'boolean') {
     throw new ValidationError('Le champ activé doit être booléen.');
   }
@@ -116,6 +119,8 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
     filenameRegex: obj.filenameRegex === undefined ? (old?.filenameRegex ?? null) : normalizeFilenameRegex(obj.filenameRegex),
     filenameRegexIgnoreCase: obj.filenameRegexIgnoreCase === undefined
       ? (old?.filenameRegexIgnoreCase ?? false) : normalizeFilenameRegexIgnoreCase(obj.filenameRegexIgnoreCase),
+    excludeLivePhotos: obj.excludeLivePhotos === undefined
+      ? (old?.excludeLivePhotos ?? false) : obj.excludeLivePhotos,
     cron: operation === 'duplicates' ? null : (schedule || null),
     enabled: obj.enabled === undefined ? true : obj.enabled,
     createdAt: old?.createdAt ?? now,

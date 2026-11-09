@@ -142,6 +142,12 @@ async function removeMovedSource(
   if (await sha256(task.sourcePath, signal, gate) !== await sha256(target, signal, gate)) {
     throw new Error('La vérification SHA-256 a échoué : source conservée.');
   }
+  const outputAfter = await lstat(target);
+  if (!outputAfter.isFile() || outputAfter.isSymbolicLink() ||
+      outputAfter.size !== output.size || outputAfter.mtimeMs !== output.mtimeMs ||
+      outputAfter.dev !== output.dev || outputAfter.ino !== output.ino) {
+    throw new Error('La cible a changé après vérification : source conservée.');
+  }
   await gate.wait(signal);
   aborted(signal);
   const finalInfo = await lstat(task.sourcePath);

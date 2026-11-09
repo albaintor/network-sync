@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Transform } from 'node:stream';
-import { lstat, opendir, rename, rm, utimes, realpath } from 'node:fs/promises';
+import { lstat, opendir, rename, rm, utimes, realpath, unlink, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Roots, RunProgress, SyncJob } from './models.js';
@@ -16,6 +16,8 @@ interface FileTask {
   relativePath: string;
   size: number;
   mtimeMs: number;
+  dev: number;
+  ino: number;
 }
 
 interface Occupant {
@@ -62,7 +64,9 @@ async function* walk(
         sourcePath: filename,
         relativePath: path.relative(base, filename),
         size: info.size,
-        mtimeMs: info.mtimeMs
+        mtimeMs: info.mtimeMs,
+        dev: info.dev,
+        ino: info.ino
       };
     }
   }
@@ -98,6 +102,55 @@ async function occupantAt(filename: string, planned: Map<string, FileTask>): Pro
   }
 }
 
+function isUnchanged(task: FileTask, info: { size: number; mtimeMs: number; dev: number; ino: number }): boolean {
+  return info.size === task.size && info.mtimeMs === task.mtimeMs &&
+    info.dev === task.dev && info.ino === task.ino;
+}
+
+/**
+ * A move is copy-then-delete, never rename across mounts. Only delete when the
+ * source is still the scanned file and the destination is byte-for-byte equal.
+ * Keep the source if publishing, verification, cancellation or deletion fails.
+ */
+async function removeMovedSource(
+  task: FileTask, target: string, destination: string, signal: AbortSignal, gate: PauseGate
+): Promise<void> {
+  await gate.wait(signal);
+  aborted(signal);
+  const canonicalSource = await realpath(task.sourcePath);
+  if (!isInside(await realpath(task.sourceRoot), canonicalSource)) {
+    throw new ValidationError('Le fichier source a quitté la racine source.');
+  }
+  const info = await lstat(task.sourcePath);
+  if (!info.isFile() || info.isSymbolicLink() || !isUnchanged(task, info)) {
+    throw new Error('La source a été modifiée : suppression refusée.');
+  }
+  const canonicalTarget = await realpath(target);
+  if (!isInside(await realpath(destination), canonicalTarget)) {
+    throw new ValidationError('Le fichier cible a quitté la destination.');
+  }
+  const output = await lstat(target);
+  if (!output.isFile() || output.isSymbolicLink() || output.size !== info.size) {
+    throw new Error('Cible invalide : suppression de la source refusée.');
+  }
+  if (await sha256(task.sourcePath) !== await sha256(target)) {
+    throw new Error('La vérification SHA-256 a échoué : source conservée.');
+  }
+  await gate.wait(signal);
+  aborted(signal);
+  const finalInfo = await lstat(task.sourcePath);
+  if (!finalInfo.isFile() || !isUnchanged(task, finalInfo)) {
+    throw new Error('La source a changé après vérification : suppression refusée.');
+  }
+  await unlink(task.sourcePath);
+  // Remove only empty descendants, never the selected source directory itself.
+  let directory = path.dirname(task.sourcePath);
+  while (directory !== task.sourceRoot && isInside(task.sourceRoot, directory)) {
+    try { await rmdir(directory); } catch { break; }
+    directory = path.dirname(directory);
+  }
+}
+
 // Write to a sibling temp file, then publish without clobbering existing names.
 // The hard-link fast path is atomic. On USB filesystems that reject links,
 // an exclusive second copy is used, which can be briefly visible before completion.
@@ -110,7 +163,7 @@ async function copyAtomic(task: FileTask, target: string, overwrite: boolean, si
       throw new ValidationError('Le fichier source a quitté la racine source.');
     }
     const before = await lstat(task.sourcePath);
-    if (!before.isFile()) throw new ValidationError('Source non régulière : ' + task.sourcePath);
+    if (!before.isFile() || !isUnchanged(task, before)) throw new ValidationError('Source modifiée depuis l’analyse : ' + task.sourcePath);
     // Pause between stream chunks, including during long video copies.
     // The temp file stays open and is cleaned up if cancelled while paused.
     const pauseStream = new Transform({
@@ -165,15 +218,15 @@ export function newProgress(job: SyncJob, dryRun: boolean): RunProgress {
     id: randomUUID(), jobId: job.id, jobName: job.name, dryRun,
     status: 'running', phase: 'scanning', startedAt: new Date().toISOString(),
     filesTotal: 0, bytesTotal: 0, processed: 0, bytesCopied: 0,
-    copied: 0, skipped: 0, excluded: 0, renamed: 0, overwritten: 0, errors: 0,
+    copied: 0, moved: 0, skipped: 0, excluded: 0, renamed: 0, overwritten: 0, errors: 0,
     errorMessages: [], currentFile: null
   };
 }
 
 /**
- * Merge all source directory trees at the destination root. Only copy;
- * never delete source or destination files. A dry run simulates collisions
- * between sources using a virtual target map.
+ * Merge source directories at the destination root, optionally flattening
+ * paths. Move is verified copy-then-delete; a dry run never changes files.
+ * A virtual target map simulates collisions between sources.
  */
 export async function executeSync(
   job: SyncJob,
@@ -206,17 +259,20 @@ export async function executeSync(
       await gate.wait(signal);
       progress.currentFile = task.sourcePath;
       try {
-        const original = path.join(job.destination, task.relativePath);
+        const relativeTarget = job.layout === 'flat' ? path.basename(task.relativePath) : task.relativePath;
+        const original = path.join(job.destination, relativeTarget);
         if (!isInside(job.destination, original)) throw new ValidationError('Chemin relatif non sûr');
         await ensureDestinationDirectory(destinationRoot, path.dirname(original), !progress.dryRun);
         const existing = await occupantAt(original, planned);
 
         let target = original;
-        let action: 'copy' | 'skip' | 'rename' | 'overwrite' = 'copy';
+        let action: 'copy' | 'same' | 'skip' | 'rename' | 'overwrite' = 'copy';
+        // Never delete an apparently identical source on the strength of size alone.
+        const comparison = job.operation === 'move' ? 'sha256' : job.compareMode;
 
         if (existing) {
-          if (await sameFile(task, existing, job.compareMode)) {
-            action = 'skip';
+          if (await sameFile(task, existing, comparison)) {
+            action = 'same';
           } else if (job.conflictPolicy === 'skip') {
             action = 'skip';
           } else if (job.conflictPolicy === 'overwrite') {
@@ -234,8 +290,9 @@ export async function executeSync(
                 found = true;
                 break;
               }
-              if (await sameFile(task, occupant, job.compareMode)) {
-                action = 'skip';
+              if (await sameFile(task, occupant, comparison)) {
+                target = candidate;
+                action = 'same';
                 found = true;
                 break;
               }
@@ -244,8 +301,14 @@ export async function executeSync(
           }
         }
 
-        if (action === 'skip') {
+        if (action === 'skip' || action === 'same') {
           progress.skipped++;
+          // Identical destination: moving removes only the verified duplicate.
+          // Conflict-policy skips always leave their source untouched.
+          if (action === 'same' && job.operation === 'move') {
+            if (!progress.dryRun) await removeMovedSource(task, target, job.destination, signal, gate);
+            progress.moved = (progress.moved ?? 0) + 1;
+          }
         } else {
           await ensureDestinationDirectory(destinationRoot, path.dirname(target), !progress.dryRun);
           if (!progress.dryRun) await copyAtomic(task, target, action === 'overwrite', signal, gate);
@@ -254,6 +317,10 @@ export async function executeSync(
           if (action === 'rename') progress.renamed++;
           if (action === 'overwrite') progress.overwritten++;
           if (!progress.dryRun) progress.bytesCopied += task.size;
+          if (job.operation === 'move') {
+            if (!progress.dryRun) await removeMovedSource(task, target, job.destination, signal, gate);
+            progress.moved = (progress.moved ?? 0) + 1;
+          }
         }
       } catch (error) {
         if (signal.aborted) throw error;

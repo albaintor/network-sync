@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { Transform } from 'node:stream';
+import { Transform, type Writable } from 'node:stream';
 import { lstat, opendir, rename, rm, utimes, realpath, unlink, rmdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -180,6 +180,7 @@ async function copyAtomic(
   const temp = path.join(path.dirname(target), '.network-sync-' + randomUUID() + '.tmp');
   const outputPath = direct ? target : temp;
   let exclusiveHandle: Awaited<ReturnType<typeof open>> | null = null;
+  let exclusiveStream: Writable | null = null;
   let ownedFile: { dev: number; ino: number } | null = null;
   let completed = false;
   try {
@@ -214,7 +215,7 @@ async function copyAtomic(
       createReadStream(task.sourcePath),
       pauseStream,
       exclusiveHandle
-        ? exclusiveHandle.createWriteStream({ autoClose: false })
+        ? (exclusiveStream = exclusiveHandle.createWriteStream({ autoClose: false }))
         : createWriteStream(temp, { flags: 'wx', mode: 0o644 }),
       { signal }
     );
@@ -259,6 +260,9 @@ async function copyAtomic(
     // On an aborted/error direct copy, remove only the file owned by this run.
     // A different inode might have been published meanwhile: never unlink it.
     if (exclusiveHandle) {
+      // FileHandle.close() waits for its live stream. Explicitly destroy the
+      // finished/aborted autoClose:false stream before closing the handle.
+      exclusiveStream?.destroy();
       await exclusiveHandle.close().catch(() => {});
       if (!completed && ownedFile) {
         const actual = await lstat(target).catch(() => null);

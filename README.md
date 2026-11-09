@@ -14,7 +14,7 @@ Network Sync est une application de transfert **unidirectionnel** des dossiers d
 - Comparaison des fichiers au même chemin : **nom et taille** par défaut, ou **SHA-256** en option pour distinguer deux fichiers de taille identique. En mode déplacement, SHA-256 est imposé avant toute suppression.
 - **Détection de doublons** : inventaire récursif d'un dossier, regroupement par taille puis SHA-256 ; revue des groupes avec choix du fichier à conserver et suppression manuelle des autres copies.
 - Renommage stable, par exemple `photo__0a6c2d8e13.jpg` : une exécution répétée ne produit pas de copies supplémentaires si le contenu n'a pas changé.
-- Exécution manuelle, simulation sans écriture, annulation, progression et historique des 30 dernières exécutions.
+- Exécution manuelle, simulation sans écriture, annulation, progression en octets (y compris pendant les gros fichiers) et historique des 30 dernières exécutions.
 - Planification cron facultative avec fuseau horaire (par défaut `Europe/Paris`).
 - Filtrage facultatif par extensions, avec présélections **images**, **vidéos**, **documents**, sélection individuelle et extensions personnalisées.
 - **Filtrage par taille** : fichiers strictement supérieurs ou inférieurs à un seuil réglable en Mo (1 Mo = 1 048 576 octets).
@@ -151,6 +151,20 @@ Dans la fenêtre de configuration d'une règle, en complément du choix des exte
 - **Combinaison** : un fichier doit satisfaire **simultanément** le filtre d'extensions (si actif), la condition de taille (si active) et la regex (si renseignée). Les fichiers exclus comptent dans le nombre « exclus » ; ils ne sont ni comparés à la destination, ni copiés, et la simulation applique les mêmes critères.
 
 Par sécurité, le serveur limite les regex à 200 caractères et refuse certains motifs susceptibles de provoquer une évaluation exponentielle (groupes répétés, lookarounds, références arrière, quantificateurs imbriqués). Le filtre de taille est borné à 100 000 000 Mo ; il peut être égal à zéro. **Les règles existantes, dépourvues de ces champs, synchronisent toujours toutes les tailles et tous les noms.**
+
+
+### Durée écoulée, débit et estimation du temps restant
+
+Pendant une **copie ou un déplacement réel**, le tableau de bord affiche :
+
+- **Volume copié / volume estimé à transférer** et une barre de progression en octets. Le volume prévisionnel est initialisé à partir des tailles des fichiers retenus par les filtres, puis **réduit au fur et à mesure** des doublons déjà présents, des fichiers ignorés et des erreurs. Ce n'est pas un pré-calcul exhaustif des conflits.
+- **Durée de transfert écoulée**, mesurée depuis la fin du scan initial (les pauses sont incluses).
+- **Débit effectif** calculé à partir des blocs qui traversent le flux de copie ; il est lissé pour éviter de changer brutalement et reste indisponible tant qu'aucun intervalle de mesure suffisant n'a été observé.
+- **Temps restant estimé** = octets encore prévus / débit observé. L'estimation se met à jour pendant les copies de gros fichiers, avec un rafraîchissement régulier de l'interface (1,5 s), et s'ajuste si la liste des transferts se réduit.
+
+L'ETA **n'est pas une promesse de durée** : les calculs SHA-256, l'écriture finale sur certains systèmes USB (copie de repli sur exFAT/FAT), les suppressions après déplacement, les variations de débit et les fichiers ignorés ultérieurement peuvent influencer la durée. Le débit affiché correspond aux données traversant le flux de copie, pas au débit théorique de l'interface réseau. L'affichage marque le débit comme indisponible pendant les pauses ou si les derniers octets datent de plus de 12 secondes. La simulation et l'analyse de doublons ne présentent pas d'ETA de **copie** puisqu'aucune donnée n'est transférée.
+
+Les champs API facultatifs `bytesToTransfer`, `bytesTransferred`, `currentFileBytes`, `currentFileSize`, `transferStartedAt`, `transferSpeedBytesPerSec`, `transferEtaSeconds` et `lastTransferAtMs` complètent le suivi existant, sans modifier la compatibilité des tâches et historiques précédents.
 
 ### Pause, reprise et annulation
 

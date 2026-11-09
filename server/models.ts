@@ -58,6 +58,8 @@ export interface RunProgress {
   currentFileBytes?: number;
   currentFileSize?: number | null;
   transferStartedAt?: string;
+  /** Selected destination publication path for the most recent file. */
+  writeMode?: 'direct' | 'atomic';
   /** Measured throughput, smoothed over recent streamed chunks. */
   transferSpeedBytesPerSec?: number | null;
   /** Approximate ETA for remaining data, not including future hashing overhead. */

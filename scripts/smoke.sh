@@ -111,4 +111,36 @@ INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
   -d '{"name":"Invalid regex","sources":["/volume1/OneDrive/OneDrive 1/Photos"],"destination":"/volumeUSB1/usbshare/InvalidRegex","filenameRegex":"(a+)+$"}' \
   -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/jobs)
 [[ "$INVALID" == 400 ]] || { echo "Expected invalid regex 400, got $INVALID" >&2; exit 1; }
-echo 'Docker smoke test passed (auth, API, conflicts, extension/size/regex filters, persistence).'
+# Duplicate-finder: different basenames, equal size and equal SHA-256.
+mkdir -p "$WORK/source/Duplicates/subfolder"
+printf 'IDENTICAL' > "$WORK/source/Duplicates/first.bin"
+printf 'IDENTICAL' > "$WORK/source/Duplicates/subfolder/another-name.txt"
+printf 'DIFFERENT' > "$WORK/source/Duplicates/different.bin"
+RESPONSE=$(curl -fsS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"name":"Duplicate smoke","operation":"duplicates","sources":["/volume1/OneDrive/Duplicates"]}' \
+  http://127.0.0.1:18080/api/jobs)
+DUPLICATES_ID=$(node -p 'JSON.parse(process.argv[1]).job.id' "$RESPONSE")
+curl -fsS -u "$AUTH" -H 'Content-Type: application/json' -d '{"dryRun":true}' \
+  "http://127.0.0.1:18080/api/jobs/$DUPLICATES_ID/run" >/dev/null
+FINISHED=0
+for _ in $(seq 1 40); do
+  STATUS=$(curl -fsS -u "$AUTH" http://127.0.0.1:18080/api/status)
+  if [[ "$STATUS" == *'"active":null'* ]]; then FINISHED=1; break; fi
+  sleep 1
+done
+[[ "$FINISHED" == 1 ]] || { echo 'Duplicate scan timeout' >&2; exit 1; }
+DUPLICATES_RESULT=$(curl -fsS -u "$AUTH" "http://127.0.0.1:18080/api/jobs/$DUPLICATES_ID/duplicates")
+node -e '
+const data=JSON.parse(process.argv[1]);
+if (!data.scan || data.scan.groups.length !== 1 || data.scan.groups[0].files.length !== 2) process.exit(1);
+' "$DUPLICATES_RESULT" || { echo 'Expected one duplicate group of two files' >&2; exit 1; }
+[[ -e "$WORK/source/Duplicates/first.bin" && -e "$WORK/source/Duplicates/subfolder/another-name.txt" ]] || {
+  echo 'Duplicate scan unexpectedly deleted files' >&2; exit 1;
+}
+INVALID=$(curl -sS -u "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"scanId":"fake","selections":[]}' \
+  -o /dev/null -w '%{http_code}' \
+  "http://127.0.0.1:18080/api/jobs/$DUPLICATES_ID/duplicates/delete")
+[[ "$INVALID" == 400 ]] || { echo "Expected stale-scan deletion rejection 400, got $INVALID" >&2; exit 1; }
+echo 'Docker smoke test passed (auth, transfers, filters, duplicate scan and deletion safeguards).'
+

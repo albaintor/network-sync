@@ -244,3 +244,145 @@ test('skips Synology @eaDir metadata and recycle folders even when syncing all e
   assert.equal(result.filesTotal, 1);
   assert.deepEqual(await readdir(path.join(destination, 'archive')), ['holiday.mp4']);
 });
+
+
+test('flat copy puts files from nested sources directly in the destination', async () => {
+  const { first, second, destination, job, put, run } = await setup();
+  job.layout = 'flat';
+  await put(first, '2025/photos/a.jpg', 'picture A');
+  await put(second, '2026/photos/b.jpg', 'picture B');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.copied, 2);
+  assert.deepEqual((await readdir(destination)).sort(), ['a.jpg', 'b.jpg']);
+  assert.equal(await readFile(path.join(first, '2025/photos/a.jpg'), 'utf8'), 'picture A');
+});
+
+test('flat copy applies the existing rename conflict policy to equal basenames', async () => {
+  const { first, second, destination, job, put, run } = await setup();
+  job.layout = 'flat';
+  job.compareMode = 'sha256';
+  await put(first, '2025/shared.jpg', 'AAA');
+  await put(second, '2026/shared.jpg', 'BBB');
+  const result = await run();
+  assert.equal(result.copied, 2);
+  assert.equal(result.renamed, 1);
+  assert.equal((await readdir(destination)).length, 2);
+  assert.deepEqual((await readdir(destination)).filter(x => x.startsWith('shared__')).length, 1);
+  assert.equal((await run()).copied, 0);
+});
+
+test('move preserves hierarchy by default and removes only moved files and empty subfolders', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.operation = 'move';
+  job.extensions = ['jpg'];
+  await put(first, 'year/month/photo.jpg', 'photo');
+  await put(first, 'year/notes.txt', 'keep');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.moved, 1);
+  assert.equal(result.copied, 1);
+  assert.equal(result.excluded, 1);
+  assert.equal(await readFile(path.join(destination, 'year/month/photo.jpg'), 'utf8'), 'photo');
+  await assert.rejects(readFile(path.join(first, 'year/month/photo.jpg')), { code: 'ENOENT' });
+  await assert.rejects(readdir(path.join(first, 'year/month')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(first, 'year/notes.txt'), 'utf8'), 'keep');
+});
+
+test('flat move detects same-size different files and safely renames both', async () => {
+  const { first, second, destination, job, put, run } = await setup();
+  job.operation = 'move';
+  job.layout = 'flat';
+  // Even though size-only comparison is configured, moving must compare hashes.
+  job.compareMode = 'size';
+  await put(first, '2025/same.mp4', 'ABCD');
+  await put(second, '2026/same.mp4', 'WXYZ');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.moved, 2);
+  assert.equal(result.copied, 2);
+  assert.equal(result.renamed, 1);
+  const names = (await readdir(destination)).sort();
+  assert.equal(names.length, 2);
+  assert.ok(names.includes('same.mp4'));
+  assert.ok(names.some(name => /^same__[0-9a-f]{10}\.mp4$/.test(name)));
+  assert.deepEqual(await readdir(first), []);
+  assert.deepEqual(await readdir(second), []);
+});
+
+test('moving a verified duplicate removes the source without recopying', async () => {
+  const { first, destination, job, put, run } = await setup();
+  await put(first, 'existing.txt', 'EXACT');
+  assert.equal((await run()).copied, 1);
+  job.operation = 'move';
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.copied, 0);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.moved, 1);
+  assert.equal(await readFile(path.join(destination, 'existing.txt'), 'utf8'), 'EXACT');
+  await assert.rejects(readFile(path.join(first, 'existing.txt')), { code: 'ENOENT' });
+});
+
+test('skip conflict in move mode retains the different source, even when sizes match', async () => {
+  const { first, second, destination, job, put, run } = await setup();
+  job.operation = 'move';
+  job.layout = 'flat';
+  job.conflictPolicy = 'skip';
+  await put(first, '2025/photo.jpg', 'AAA');
+  await put(second, '2026/photo.jpg', 'BBB');
+  const result = await run();
+  assert.equal(result.status, 'completed');
+  assert.equal(result.copied, 1);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.moved, 1);
+  assert.equal(await readFile(path.join(destination, 'photo.jpg'), 'utf8'), 'AAA');
+  assert.equal(await readFile(path.join(second, '2026/photo.jpg'), 'utf8'), 'BBB');
+});
+
+test('dry-run move with flattening leaves source and destination untouched', async () => {
+  const { first, destination, job, put, run } = await setup();
+  job.operation = 'move';
+  job.layout = 'flat';
+  await put(first, 'photos/photo.jpg', 'A');
+  const result = await run(true);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.copied, 1);
+  assert.equal(result.moved, 1);
+  assert.equal(await readFile(path.join(first, 'photos/photo.jpg'), 'utf8'), 'A');
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});
+
+test('cancelling a paused move does not delete its source', async () => {
+  const { first, roots, job, destination, put } = await setup();
+  const { PauseGate } = await import('./pause.js');
+  job.operation = 'move';
+  await put(first, 'movie.mkv', 'video');
+  const gate = new PauseGate();
+  const controller = new AbortController();
+  const progress = newProgress(job, false);
+  const promise = executeSync(job, progress, roots, controller.signal, () => {
+    if (progress.phase === 'copying') gate.pause();
+  }, gate);
+  for (let i = 0; i < 500 && !gate.isPaused; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(gate.isPaused, true);
+  controller.abort();
+  await promise;
+  assert.equal(progress.status, 'cancelled');
+  assert.equal(await readFile(path.join(first, 'movie.mkv'), 'utf8'), 'video');
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});
+
+test('move rejects overlapping source paths before writing or removing anything', async () => {
+  const { first, roots, job, destination, put, run } = await setup();
+  job.operation = 'move';
+  await put(first, 'nested/photo.jpg', 'photo');
+  job.sources = [first, path.join(first, 'nested')];
+  const result = await run();
+  assert.equal(result.status, 'failed');
+  assert.match(result.errorMessages[0], /imbriqu/);
+  assert.equal(await readFile(path.join(first, 'nested/photo.jpg'), 'utf8'), 'photo');
+  await assert.rejects(readdir(destination), { code: 'ENOENT' });
+});

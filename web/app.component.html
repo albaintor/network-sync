@@ -204,7 +204,11 @@
                   </div>
                   <div class="transfer-metric">
                     <small>Débit mesuré</small>
-                    <strong>{{ transferSpeed(progress) !== null ? formatBytes(transferSpeed(progress)!) + '/s' : (progress.status === 'paused' ? 'En pause' : 'Calcul en cours…') }}</strong>
+                    @if (transferSpeed(progress); as speed) {
+                      <strong>{{ formatBytes(speed) }}/s</strong>
+                    } @else {
+                      <strong>{{ progress.status === 'paused' ? 'En pause' : 'Calcul en cours…' }}</strong>
+                    }
                   </div>
                   <div class="transfer-metric">
                     <small>Temps restant estimé</small>
@@ -216,8 +220,8 @@
               }
               @if (progress.currentFile) {
                 <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p>
-                @if (!progress.dryRun && progress.currentFileSize) {
-                  <p class="helper">Fichier actuel : {{ formatBytes(progress.currentFileBytes ?? 0) }} / {{ formatBytes(progress.currentFileSize) }}</p>
+                @if (!progress.dryRun && progress.currentFileSize; as fileSize) {
+                  <p class="helper">Fichier actuel : {{ formatBytes(progress.currentFileBytes ?? 0) }} / {{ formatBytes(fileSize) }}</p>
                 }
               }
             </div>

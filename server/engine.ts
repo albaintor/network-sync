@@ -158,9 +158,11 @@ async function removeMovedSource(
     throw new Error('La vérification SHA-256 a échoué : source conservée.');
   }
   const outputAfter = await lstat(target);
+  // The destination can also be exFAT: its inode may change between lstat
+  // calls. The destination's SHA-256 was checked just above; reject changes
+  // in size, timestamp or volume, not an exFAT inode-number fluctuation.
   if (!outputAfter.isFile() || outputAfter.isSymbolicLink() ||
-      outputAfter.size !== output.size || outputAfter.mtimeMs !== output.mtimeMs ||
-      outputAfter.dev !== output.dev || outputAfter.ino !== output.ino) {
+      !sourceMetadataMatches(output, outputAfter)) {
     throw new Error('La cible a changé après vérification : source conservée.');
   }
   await gate.wait(signal);

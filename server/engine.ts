@@ -12,6 +12,7 @@ import { PauseGate } from './pause.js';
 import { publishWithoutOverwrite } from './publish.js';
 import { chooseWriteMode } from './write-mode.js';
 import { TransferMeter } from './transfer-meter.js';
+import { sourceMetadataMatches, changedSourceMetadata } from './source-metadata.js';
 
 interface FileTask {
   sourceRoot: string;
@@ -115,9 +116,13 @@ async function occupantAt(filename: string, planned: Map<string, FileTask>): Pro
   }
 }
 
-function isUnchanged(task: FileTask, info: { size: number; mtimeMs: number; dev: number; ino: number }): boolean {
-  return info.size === task.size && info.mtimeMs === task.mtimeMs &&
-    info.dev === task.dev && info.ino === task.ino;
+function isUnchanged(task: FileTask, info: { size: number; mtimeMs: number; dev: number }): boolean {
+  return sourceMetadataMatches(task, info);
+}
+
+function sourceChangedMessage(task: FileTask, info: { size: number; mtimeMs: number; dev: number }): string {
+  const differences = changedSourceMetadata(task, info);
+  return 'Source modifiée depuis l’analyse (' + differences.join(', ') + ') : ' + task.sourcePath;
 }
 
 /**
@@ -135,8 +140,11 @@ async function removeMovedSource(
     throw new ValidationError('Le fichier source a quitté la racine source.');
   }
   const info = await lstat(task.sourcePath);
-  if (!info.isFile() || info.isSymbolicLink() || !isUnchanged(task, info)) {
-    throw new Error('La source a été modifiée : suppression refusée.');
+  if (!info.isFile() || info.isSymbolicLink()) {
+    throw new Error('La source a été remplacée par autre chose qu’un fichier ordinaire : suppression refusée.');
+  }
+  if (!isUnchanged(task, info)) {
+    throw new Error(sourceChangedMessage(task, info) + ' : suppression refusée.');
   }
   const canonicalTarget = await realpath(target);
   if (!isInside(await realpath(destination), canonicalTarget)) {
@@ -158,8 +166,11 @@ async function removeMovedSource(
   await gate.wait(signal);
   aborted(signal);
   const finalInfo = await lstat(task.sourcePath);
-  if (!finalInfo.isFile() || !isUnchanged(task, finalInfo)) {
-    throw new Error('La source a changé après vérification : suppression refusée.');
+  if (!finalInfo.isFile() || finalInfo.isSymbolicLink()) {
+    throw new Error('La source n’est plus un fichier ordinaire : suppression refusée.');
+  }
+  if (!isUnchanged(task, finalInfo)) {
+    throw new Error(sourceChangedMessage(task, finalInfo) + ' : suppression refusée.');
   }
   await unlink(task.sourcePath);
   // Remove only empty descendants, never the selected source directory itself.
@@ -195,8 +206,11 @@ async function copyAtomic(
       throw new ValidationError('Le fichier source a quitté la racine source.');
     }
     const before = await lstat(task.sourcePath);
-    if (!before.isFile() || !isUnchanged(task, before)) {
-      throw new ValidationError('Source modifiée depuis l’analyse : ' + task.sourcePath);
+    if (!before.isFile() || before.isSymbolicLink()) {
+      throw new ValidationError('Source invalide (fichier ordinaire attendu) : ' + task.sourcePath);
+    }
+    if (!isUnchanged(task, before)) {
+      throw new ValidationError(sourceChangedMessage(task, before));
     }
 
     // Open the final path exclusively before streaming: an existing file is
@@ -226,8 +240,8 @@ async function copyAtomic(
     );
     await gate.wait(signal);
     const after = await lstat(task.sourcePath);
-    if (!isUnchanged(task, after)) {
-      throw new Error('Le fichier source a été modifié pendant sa copie.');
+    if (!after.isFile() || after.isSymbolicLink() || !isUnchanged(task, after)) {
+      throw new Error('Le fichier source a été modifié pendant sa copie : ' + task.sourcePath);
     }
     if (exclusiveHandle) {
       // Update the opened inode, not an unrelated file swapped into its path.

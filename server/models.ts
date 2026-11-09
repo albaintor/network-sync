@@ -50,6 +50,19 @@ export interface RunProgress {
   /** Groups confirmed by content hash. */
   duplicateGroups?: number;
   bytesTotal: number;
+  /** Estimated bytes needing copy; adjusted as conflicts and errors are resolved. */
+  bytesToTransfer?: number;
+  /** Successfully copied bytes + current in-progress file bytes. */
+  bytesTransferred?: number;
+  /** Bytes streamed for the active file (not yet committed). */
+  currentFileBytes?: number;
+  currentFileSize?: number | null;
+  transferStartedAt?: string;
+  /** Measured throughput, smoothed over recent streamed chunks. */
+  transferSpeedBytesPerSec?: number | null;
+  /** Approximate ETA for remaining data, not including future hashing overhead. */
+  transferEtaSeconds?: number | null;
+  lastTransferAtMs?: number;
   processed: number;
   bytesCopied: number;
   copied: number;

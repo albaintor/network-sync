@@ -252,6 +252,7 @@ export async function executeSync(
   onUpdate: () => void = () => {},
   gate: PauseGate = new PauseGate()
 ): Promise<void> {
+  let meter: TransferMeter | null = null;
   try {
     await validateJobPaths(job, roots);
     const destinationRoot = await destinationRootFor(job.destination, roots);
@@ -269,7 +270,7 @@ export async function executeSync(
     }
 
     progress.phase = 'copying';
-    const meter = !progress.dryRun ? new TransferMeter(progress, onUpdate) : null;
+    meter = !progress.dryRun ? new TransferMeter(progress, onUpdate) : null;
     meter?.begin();
     onUpdate();
     const planned = new Map<string, FileTask>();
@@ -358,7 +359,6 @@ export async function executeSync(
         onUpdate();
       }
     }
-    meter?.finish();
     progress.status = progress.errors ? 'completed_with_errors' : 'completed';
   } catch (error) {
     if (signal.aborted) {
@@ -368,6 +368,7 @@ export async function executeSync(
       progress.status = 'failed';
     }
   } finally {
+    meter?.finish();
     progress.phase = 'finished';
     progress.currentFile = null;
     progress.currentFileBytes = 0;

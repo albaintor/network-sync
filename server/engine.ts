@@ -223,10 +223,21 @@ async function copyAtomic(
     if (!isUnchanged(task, after)) {
       throw new Error('Le fichier source a été modifié pendant sa copie.');
     }
-    await utimes(outputPath, before.atime, before.mtime);
+    if (exclusiveHandle) {
+      // Update the opened inode, not an unrelated file swapped into its path.
+      await exclusiveHandle.utimes(before.atime, before.mtime);
+    } else {
+      await utimes(outputPath, before.atime, before.mtime);
+    }
     aborted(signal);
 
     if (direct) {
+      const published = await lstat(target);
+      if (!published.isFile() || published.isSymbolicLink() ||
+          published.dev !== ownedFile?.dev || published.ino !== ownedFile.ino ||
+          published.size !== before.size) {
+        throw new Error('La cible a changé pendant son écriture directe.');
+      }
       completed = true;
       return;
     }
@@ -251,7 +262,7 @@ async function copyAtomic(
       await exclusiveHandle.close().catch(() => {});
       if (!completed && ownedFile) {
         const actual = await lstat(target).catch(() => null);
-        if (actual?.isFile() && !actual.isSymbolicLink() &&
+        if (ownedFile.ino !== 0 && actual?.isFile() && !actual.isSymbolicLink() &&
             actual.dev === ownedFile.dev && actual.ino === ownedFile.ino) {
           await unlink(target).catch(() => {});
         }

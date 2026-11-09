@@ -467,6 +467,12 @@ export class AppComponent implements OnInit, OnDestroy {
     }
 
     if (this.browseKind !== 'source') return;
+    if (this.form.operation === 'duplicates') {
+      this.form.sources = [chosen];
+      this.browseKind = null;
+      this.browseIndex = -1;
+      return;
+    }
     const index = this.browseIndex >= 0
       ? this.browseIndex : this.form.sources.findIndex(x => !x.trim());
     if (this.form.sources.some((x, i) => x === chosen && i !== index)) {

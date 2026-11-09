@@ -220,8 +220,10 @@
               }
               @if (progress.currentFile) {
                 <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p>
-                @if (!progress.dryRun && progress.currentFileSize; as fileSize) {
-                  <p class="helper">Fichier actuel : {{ formatBytes(progress.currentFileBytes ?? 0) }} / {{ formatBytes(fileSize) }}</p>
+                @if (progress.currentFileSize; as fileSize) {
+                  @if (!progress.dryRun) {
+                    <p class="helper">Fichier actuel : {{ formatBytes(progress.currentFileBytes ?? 0) }} / {{ formatBytes(fileSize) }}</p>
+                  }
                 }
               }
             </div>

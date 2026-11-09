@@ -393,10 +393,10 @@
   <div class="modal-backdrop folder-layer">
     <div class="browser-modal" role="dialog" aria-modal="true" aria-label="Explorateur de dossiers" (click)="$event.stopPropagation()">
       <div class="modal-header">
-        <div><div class="eyebrow">EXPLORATEUR NAS</div><h2>{{ browseKind === 'source' ? 'Ajouter des dossiers sources' : 'Choisir la destination' }}</h2></div>
+        <div><div class="eyebrow">EXPLORATEUR NAS</div><h2>{{ browseKind === 'source' ? (form.operation === 'duplicates' ? 'Choisir le dossier à analyser' : 'Ajouter des dossiers sources') : 'Choisir la destination' }}</h2></div>
         <button class="close-button" aria-label="Fermer l’explorateur" (click)="browseKind = null">✕</button>
       </div>
-      <p class="browse-help">Cliquez sur <strong>Ouvrir</strong> pour parcourir un sous-dossier ou sur <strong>Ajouter</strong> pour l'utiliser directement comme source. La navigation ne ferme jamais l'explorateur.</p>
+      <p class="browse-help">{{ form.operation === 'duplicates' && browseKind === 'source' ? 'Parcourez les sous-dossiers, puis sélectionnez le seul dossier à analyser.' : 'Cliquez sur Ouvrir pour parcourir un sous-dossier ou sur Ajouter pour sélectionner un emplacement.' }}</p>
       <div class="browser-path">
         <button class="small-button" (click)="listDirectories()" [disabled]="browseLoading">Volumes</button>
         <button class="small-button" [disabled]="!browsePath || browseLoading" (click)="browseUp()">↑ Parent</button>
@@ -417,7 +417,7 @@
                 <span class="folder-added">Ajouté</span>
               } @else {
                 <button type="button" class="small-button folder-select" (click)="chooseFolder(directory.path)">
-                  {{ browseKind === 'source' ? '＋ Ajouter' : 'Choisir' }}
+                  {{ browseKind === 'source' ? (form.operation === 'duplicates' ? 'Sélectionner' : '＋ Ajouter') : 'Choisir' }}
                 </button>
               }
             </div>

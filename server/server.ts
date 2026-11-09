@@ -9,7 +9,7 @@ import { normalizeExtensions } from './extensions.js';
 import { normalizeFilenameRegex, normalizeFilenameRegexIgnoreCase, normalizeSizeFilter } from './filters.js';
 import { PauseGate } from './pause.js';
 import { Storage } from './storage.js';
-import type { CompareMode, ConflictPolicy, RunProgress, SyncJob } from './models.js';
+import type { CompareMode, ConflictPolicy, DestinationLayout, RunProgress, SyncJob, TransferMode } from './models.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -81,6 +81,10 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
   if (!['rename', 'skip', 'overwrite'].includes(String(conflict))) throw new ValidationError('Règle de conflit inconnue.');
   const compare = obj.compareMode ?? 'size';
   if (!['size', 'sha256'].includes(String(compare))) throw new ValidationError('Mode de comparaison inconnu.');
+  const operation = obj.operation ?? old?.operation ?? 'copy';
+  if (operation !== 'copy' && operation !== 'move') throw new ValidationError('Opération de transfert inconnue.');
+  const layout = obj.layout ?? old?.layout ?? 'tree';
+  if (layout !== 'tree' && layout !== 'flat') throw new ValidationError('Organisation de destination inconnue.');
   const schedule = typeof obj.cron === 'string' ? obj.cron.trim() : '';
   if (schedule && !cron.validate(schedule)) throw new ValidationError('Expression cron invalide.');
   if (obj.enabled !== undefined && typeof obj.enabled !== 'boolean') {
@@ -97,6 +101,8 @@ function parseJob(input: unknown, old?: SyncJob): SyncJob {
     destination: path.resolve(obj.destination.trim()),
     conflictPolicy: conflict as ConflictPolicy,
     compareMode: compare as CompareMode,
+    operation: operation as TransferMode,
+    layout: layout as DestinationLayout,
     extensions: obj.extensions === undefined ? (old?.extensions ?? null) : normalizeExtensions(obj.extensions),
     sizeFilter: obj.sizeFilter === undefined ? (old?.sizeFilter ?? null) : normalizeSizeFilter(obj.sizeFilter),
     filenameRegex: obj.filenameRegex === undefined ? (old?.filenameRegex ?? null) : normalizeFilenameRegex(obj.filenameRegex),

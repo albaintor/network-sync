@@ -1,5 +1,7 @@
 export type ConflictPolicy = 'rename' | 'skip' | 'overwrite';
 export type CompareMode = 'size' | 'sha256';
+export type TransferMode = 'copy' | 'move';
+export type DestinationLayout = 'tree' | 'flat';
 
 export interface SizeFilter {
   operator: 'gt' | 'lt';
@@ -13,6 +15,10 @@ export interface SyncJob {
   destination: string;
   conflictPolicy: ConflictPolicy;
   compareMode: CompareMode;
+  /** Defaults to copy for previously saved jobs. */
+  operation?: TransferMode;
+  /** Defaults to preserving each source's relative paths. */
+  layout?: DestinationLayout;
   /** null/undefined = all files; non-empty list = allowed filename extensions. */
   extensions?: string[] | null;
   /** Optional strict threshold (MiB), no filtering on older rules. */
@@ -32,6 +38,7 @@ export interface RunProgress {
   id: string;
   jobId: string;
   jobName: string;
+  operation?: TransferMode;
   dryRun: boolean;
   status: RunStatus;
   phase: 'scanning' | 'copying' | 'finished';
@@ -42,6 +49,8 @@ export interface RunProgress {
   processed: number;
   bytesCopied: number;
   copied: number;
+  /** Source files removed (or that would be removed in a simulation). */
+  moved?: number;
   skipped: number;
   /** Files excluded by any file filter during source scanning. */
   excluded?: number;

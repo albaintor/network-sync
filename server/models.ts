@@ -26,6 +26,8 @@ export interface SyncJob {
   /** JavaScript regular expression tested on the basename (not the path). */
   filenameRegex?: string | null;
   filenameRegexIgnoreCase?: boolean;
+  /** Exclude Apple Live Photo motion clips based on QuickTime markers. */
+  excludeLivePhotos?: boolean;
   cron: string | null;
   enabled: boolean;
   createdAt: string;
@@ -73,6 +75,8 @@ export interface RunProgress {
   skipped: number;
   /** Files excluded by any file filter during source scanning. */
   excluded?: number;
+  /** Subset of excluded files identified as Apple Live Photo video. */
+  livePhotosExcluded?: number;
   renamed: number;
   overwritten: number;
   errors: number;

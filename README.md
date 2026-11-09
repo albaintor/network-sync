@@ -24,6 +24,14 @@ Network Sync est une application de transfert **unidirectionnel** des dossiers d
 - Explorateur des répertoires autorisés, interface responsive, authentification HTTP Basic.
 - En mode **copie**, aucune suppression de fichiers sources ; en mode **déplacement**, suppression individuelle après vérification, sans purge des fichiers exclus ou ignorés. Liens symboliques ignorés dans les sources, refusés dans les chemins de destination.
 
+## Déplacements depuis un volume exFAT
+
+Sur certains pilotes exFAT (natif Linux ou FUSE), le numéro d'inode (`stat.ino`) d'un même fichier peut varier entre l'inventaire initial et sa réouverture. Il n'est donc **pas utilisé comme preuve d'une modification** par le moteur de copie/déplacement.
+
+Le moteur conserve la comparaison de la taille, de la date de modification et du numéro de volume (`dev`) et vérifie que le chemin source est toujours sous la racine autorisée et n'est pas un lien symbolique. Lors d'un **déplacement**, il calcule **SHA-256 de la source et de la destination** avant toute suppression, puis revérifie le chemin et les métadonnées avant de supprimer la source. Une modification de taille ou d'horodatage entraîne toujours un refus, signalant désormais le champ qui diffère.
+
+Une relance après un déplacement interrompu ou partiellement échoué peut réutiliser les fichiers déjà copiés : si la cible existante est identique en SHA-256, elle n'est pas recopiée ; la source est alors retirée après les mêmes validations. Pour diagnostiquer un retour d'erreur, rechercher les champs listés dans `Source modifiée depuis l’analyse (taille/date de modification/volume)`.
+
 ## Optimisation des écritures sur exFAT USB
 
 Le paramètre d'environnement `NETWORK_SYNC_WRITE_MODE` vaut `auto` par défaut et peut être défini dans `.env` avec Docker Manager :

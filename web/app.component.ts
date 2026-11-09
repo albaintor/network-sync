@@ -5,11 +5,14 @@ import { FormsModule } from '@angular/forms';
 
 type ConflictPolicy = 'rename' | 'skip' | 'overwrite';
 type CompareMode = 'size' | 'sha256';
+type TransferMode = 'copy' | 'move';
+type DestinationLayout = 'tree' | 'flat';
 type SizeFilterMode = 'none' | 'gt' | 'lt';
 interface SizeFilter { operator: 'gt' | 'lt'; megabytes: number; }
 interface Job {
   id: string; name: string; sources: string[]; destination: string;
   conflictPolicy: ConflictPolicy; compareMode: CompareMode;
+  operation?: TransferMode; layout?: DestinationLayout;
   cron: string | null; enabled: boolean; updatedAt: string;
   extensions?: string[] | null;
   sizeFilter?: SizeFilter | null;
@@ -18,7 +21,8 @@ interface Job {
 }
 interface JobForm {
   name: string; sources: string[]; destination: string;
-  conflictPolicy: ConflictPolicy; compareMode: CompareMode; cron: string; enabled: boolean;
+  conflictPolicy: ConflictPolicy; compareMode: CompareMode;
+  operation: TransferMode; layout: DestinationLayout; cron: string; enabled: boolean;
   extensions: string[] | null;
   sizeFilter: SizeFilter | null;
   filenameRegex: string;
@@ -26,9 +30,10 @@ interface JobForm {
 }
 interface Run {
   id: string; jobId: string; jobName: string; status: string;
+  operation?: TransferMode;
   phase: string; dryRun: boolean; startedAt: string; finishedAt?: string;
   filesTotal: number; bytesTotal: number; processed: number;
-  bytesCopied: number; copied: number; skipped: number; excluded?: number; renamed: number;
+  bytesCopied: number; copied: number; moved?: number; skipped: number; excluded?: number; renamed: number;
   overwritten: number; errors: number; errorMessages: string[]; currentFile: string | null;
 }
 
@@ -100,7 +105,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   private blankForm(): JobForm {
     return { name: '', sources: [''], destination: '', conflictPolicy: 'rename',
-      compareMode: 'size', cron: '', enabled: true, extensions: null,
+      compareMode: 'size', operation: 'copy', layout: 'tree', cron: '', enabled: true, extensions: null,
       sizeFilter: null, filenameRegex: '', filenameRegexIgnoreCase: false };
   }
 
@@ -152,6 +157,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.form = job
       ? { name: job.name, sources: [...job.sources], destination: job.destination,
           conflictPolicy: job.conflictPolicy, compareMode: job.compareMode,
+          operation: job.operation ?? 'copy', layout: job.layout ?? 'tree',
           cron: job.cron ?? '', enabled: job.enabled,
           extensions: job.extensions ? [...job.extensions] : null,
           sizeFilter: job.sizeFilter ? { ...job.sizeFilter } : null,
@@ -281,6 +287,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
   run(job: Job, dryRun: boolean): void {
     if (this.active) return;
+    if (!dryRun && job.operation === 'move' &&
+        !confirm('Déplacer les fichiers de « ' + job.name + ' » ? Les sources seront supprimées après vérification SHA-256 de leur copie.')) return;
     this.error = '';
     this.http.post<{ run: Run }>('/api/jobs/' + job.id + '/run', { dryRun }).subscribe({
       next: data => { this.active = data.run; this.selectedId = job.id; },

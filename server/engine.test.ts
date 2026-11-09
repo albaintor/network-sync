@@ -478,3 +478,109 @@ test('cancelled copy does not retain uncommitted bytes as transferred', async ()
   assert.equal(progress.currentFileBytes, 0);
   assert.equal(progress.transferEtaSeconds, null);
 });
+
+
+test('forced exFAT mode copies directly with no temporary file or extra publication copy', async () => {
+  const previous = process.env.NETWORK_SYNC_WRITE_MODE;
+  process.env.NETWORK_SYNC_WRITE_MODE = 'direct';
+  try {
+    const { first, destination, job, put, run } = await setup();
+    await put(first, 'nested/movie.mkv', 'MOVIE-CONTENT');
+    const result = await run();
+    assert.equal(result.status, 'completed');
+    assert.equal(result.writeMode, 'direct');
+    assert.equal(result.bytesCopied, 13);
+    const folder = path.join(destination, 'nested');
+    assert.deepEqual(await readdir(folder), ['movie.mkv']);
+    assert.equal(await readFile(path.join(folder, 'movie.mkv'), 'utf8'), 'MOVIE-CONTENT');
+    assert.equal(await readFile(path.join(first, 'nested/movie.mkv'), 'utf8'), 'MOVIE-CONTENT');
+  } finally {
+    if (previous === undefined) delete process.env.NETWORK_SYNC_WRITE_MODE;
+    else process.env.NETWORK_SYNC_WRITE_MODE = previous;
+  }
+});
+
+test('direct exFAT mode preserves an existing different file under rename conflict policy', async () => {
+  const previous = process.env.NETWORK_SYNC_WRITE_MODE;
+  process.env.NETWORK_SYNC_WRITE_MODE = 'direct';
+  try {
+    const { first, destination, job, put, run } = await setup();
+    await put(first, 'photo.jpg', 'NEW');
+    await put(destination, 'photo.jpg', 'OLD-ORIGINAL');
+    const result = await run();
+    assert.equal(result.status, 'completed');
+    assert.equal(result.renamed, 1);
+    assert.equal(await readFile(path.join(destination, 'photo.jpg'), 'utf8'), 'OLD-ORIGINAL');
+    const names = await readdir(destination);
+    assert.equal(names.length, 2);
+    assert.ok(names.some(name => /^photo__[a-f0-9]{10}\.jpg$/.test(name)));
+  } finally {
+    if (previous === undefined) delete process.env.NETWORK_SYNC_WRITE_MODE;
+    else process.env.NETWORK_SYNC_WRITE_MODE = previous;
+  }
+});
+
+test('direct exFAT mode removes incomplete output after cancellation and keeps source', async () => {
+  const previous = process.env.NETWORK_SYNC_WRITE_MODE;
+  process.env.NETWORK_SYNC_WRITE_MODE = 'direct';
+  try {
+    const { first, destination, job, roots, put } = await setup();
+    const controller = new AbortController();
+    await put(first, 'large.bin', 'Q'.repeat(1_000_000));
+    const progress = newProgress(job, false);
+    let aborted = false;
+    await executeSync(job, progress, roots, controller.signal, () => {
+      if ((progress.currentFileBytes ?? 0) > 0 && !aborted) {
+        aborted = true;
+        controller.abort();
+      }
+    });
+    assert.equal(progress.status, 'cancelled');
+    assert.equal(progress.writeMode, 'direct');
+    assert.equal(await readFile(path.join(first, 'large.bin'), 'utf8'), 'Q'.repeat(1_000_000));
+    await assert.rejects(readFile(path.join(destination, 'large.bin')), { code: 'ENOENT' });
+    assert.equal((await readdir(destination)).some(x => x.startsWith('.network-sync-')), false);
+  } finally {
+    if (previous === undefined) delete process.env.NETWORK_SYNC_WRITE_MODE;
+    else process.env.NETWORK_SYNC_WRITE_MODE = previous;
+  }
+});
+
+test('direct exFAT move verifies copy then deletes the source', async () => {
+  const previous = process.env.NETWORK_SYNC_WRITE_MODE;
+  process.env.NETWORK_SYNC_WRITE_MODE = 'direct';
+  try {
+    const { first, destination, job, put, run } = await setup();
+    job.operation = 'move';
+    await put(first, 'movie.mkv', 'VERIFIED-MEDIA');
+    const result = await run();
+    assert.equal(result.status, 'completed');
+    assert.equal(result.writeMode, 'direct');
+    assert.equal(result.moved, 1);
+    assert.equal(await readFile(path.join(destination, 'movie.mkv'), 'utf8'), 'VERIFIED-MEDIA');
+    await assert.rejects(readFile(path.join(first, 'movie.mkv')), { code: 'ENOENT' });
+  } finally {
+    if (previous === undefined) delete process.env.NETWORK_SYNC_WRITE_MODE;
+    else process.env.NETWORK_SYNC_WRITE_MODE = previous;
+  }
+});
+
+test('explicit overwrite still uses temporary file and atomic rename in direct mode', async () => {
+  const previous = process.env.NETWORK_SYNC_WRITE_MODE;
+  process.env.NETWORK_SYNC_WRITE_MODE = 'direct';
+  try {
+    const { first, destination, job, put, run } = await setup();
+    job.conflictPolicy = 'overwrite';
+    await put(first, 'movie.mkv', 'NEW-DATA');
+    await put(destination, 'movie.mkv', 'OLD');
+    const result = await run();
+    assert.equal(result.status, 'completed');
+    assert.equal(result.writeMode, 'atomic');
+    assert.equal(result.overwritten, 1);
+    assert.equal(await readFile(path.join(destination, 'movie.mkv'), 'utf8'), 'NEW-DATA');
+    assert.deepEqual(await readdir(destination), ['movie.mkv']);
+  } finally {
+    if (previous === undefined) delete process.env.NETWORK_SYNC_WRITE_MODE;
+    else process.env.NETWORK_SYNC_WRITE_MODE = previous;
+  }
+});

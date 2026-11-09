@@ -172,9 +172,11 @@ async function removeMovedSource(
 // overwrites always keep temp-file + rename.
 async function copyAtomic(
   task: FileTask, target: string, overwrite: boolean, signal: AbortSignal, gate: PauseGate,
-  onBytes: (size: number) => void = () => {}
+  onBytes: (size: number) => void = () => {},
+  onMode: (mode: 'direct' | 'atomic') => void = () => {}
 ): Promise<void> {
   const direct = !overwrite && await chooseWriteMode(path.dirname(target)) === 'direct';
+  onMode(direct ? 'direct' : 'atomic');
   const temp = path.join(path.dirname(target), '.network-sync-' + randomUUID() + '.tmp');
   const outputPath = direct ? target : temp;
   let exclusiveHandle: Awaited<ReturnType<typeof open>> | null = null;
@@ -372,7 +374,8 @@ export async function executeSync(
           await ensureDestinationDirectory(destinationRoot, path.dirname(target), !progress.dryRun);
           if (!progress.dryRun) {
             meter?.beginFile(task.size);
-            await copyAtomic(task, target, action === 'overwrite', signal, gate, bytes => meter?.chunk(bytes));
+            await copyAtomic(task, target, action === 'overwrite', signal, gate,
+              bytes => meter?.chunk(bytes), mode => { progress.writeMode = mode; onUpdate(); });
             progress.bytesCopied += task.size;
             meter?.completeFile();
           } else {

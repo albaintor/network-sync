@@ -22,6 +22,9 @@ services:
       APP_USERNAME: "${APP_USERNAME:?Set APP_USERNAME in .env}"
       APP_PASSWORD: "${APP_PASSWORD:?Set APP_PASSWORD in .env}"
       DATA_DIR: /app/data
+      # auto uses single-pass exclusive writes on recognized exFAT USB volumes.
+      # Set direct explicitly if Synology exposes exFAT as generic fuseblk.
+      NETWORK_SYNC_WRITE_MODE: "${NETWORK_SYNC_WRITE_MODE:-auto}"
       # Accessible Docker mounts, NOT preset synchronization source/destination.
       SYNC_MOUNT_ROOTS: /volume1;/volumeUSB1
     volumes:

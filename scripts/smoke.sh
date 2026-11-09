@@ -20,6 +20,7 @@ printf 'EXCLUDED' > "$WORK/source/OneDrive 1/Photos/2026/01/document.pdf"
 
 docker run -d --rm --name "$NAME" -p 127.0.0.1:18080:8080 \
   -e APP_USERNAME=smoke -e APP_PASSWORD='smokepassword1234' \
+  -e NETWORK_SYNC_WRITE_MODE=direct \
   -v "$WORK/source:/volume1/OneDrive:ro" \
   -v "$WORK/destination:/volumeUSB1/usbshare:rw" \
   -v "$WORK/data:/app/data:rw" network-sync:test >/dev/null
@@ -75,6 +76,10 @@ FOLDER="$WORK/destination/Photos/2026/01"
 
 RUNS=$(curl -fsS -u "$AUTH" "http://127.0.0.1:18080/api/jobs/$ID/runs")
 [[ "$RUNS" == *'"status":"completed"'* ]] || { echo "Unexpected sync status: $RUNS" >&2; exit 1; }
+[[ "$RUNS" == *'"writeMode":"direct"'* ]] || { echo "Expected single-pass exFAT write mode: $RUNS" >&2; exit 1; }
+[[ "$(find "$FOLDER" -type f -name '.network-sync-*.tmp' | wc -l)" -eq 0 ]] || {
+  echo 'A temporary file was left behind by exclusive write mode' >&2; exit 1;
+}
 [[ "$RUNS" == *'"excluded":1'* ]] || { echo "Expected one filtered file: $RUNS" >&2; exit 1; }
 [[ ! -e "$FOLDER/document.pdf" ]] || { echo 'Excluded PDF was copied' >&2; exit 1; }
 JOBS=$(curl -fsS -u "$AUTH" http://127.0.0.1:18080/api/jobs)

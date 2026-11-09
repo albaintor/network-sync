@@ -216,7 +216,10 @@
                   </div>
                 </div>
                 <div class="progress-track transfer-bytes-track"><div class="progress-fill" [style.width.%]="bytePercentage(progress)"></div></div>
-                <p class="helper transfer-estimate-note">Estimation selon le débit de copie observé. Elle se recalcule lorsque des fichiers sont ignorés ou que le débit évolue ; les comparaisons SHA-256 et la publication peuvent ajouter du temps. Durée écoulée pauses incluses.</p>
+                <p class="helper transfer-estimate-note">
+                  @if (progress.writeMode === 'direct') { <strong>Mode optimisé : écriture directe exclusive (une seule copie).</strong> }
+                  @else if (progress.writeMode === 'atomic') { <strong>Mode : fichier temporaire puis publication.</strong> }
+                  Estimation selon le débit de copie observé. Elle se recalcule lorsque des fichiers sont ignorés ou que le débit évolue ; les comparaisons SHA-256 et la publication peuvent ajouter du temps. Durée écoulée pauses incluses.</p>
               }
               @if (progress.currentFile) {
                 <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p>

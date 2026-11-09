@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { Transform } from 'node:stream';
-import { lstat, opendir, rename, rm, utimes, realpath, unlink, rmdir } from 'node:fs/promises';
+import { Transform, type Writable } from 'node:stream';
+import { lstat, opendir, rename, rm, utimes, realpath, unlink, rmdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { Roots, RunProgress, SyncJob } from './models.js';
@@ -9,6 +9,7 @@ import { destinationRootFor, ensureDestinationDirectory, isInside, validateJobPa
 import { compileFilenameRegex, matchesFileFilters } from './filters.js';
 import { PauseGate } from './pause.js';
 import { publishWithoutOverwrite } from './publish.js';
+import { chooseWriteMode } from './write-mode.js';
 import { TransferMeter } from './transfer-meter.js';
 
 interface FileTask {
@@ -164,14 +165,24 @@ async function removeMovedSource(
   }
 }
 
-// Write to a sibling temp file, then publish without clobbering existing names.
-// The hard-link fast path is atomic. On USB filesystems that reject links,
-// an exclusive second copy is used, which can be briefly visible before completion.
+// On exFAT the temporary-file/hard-link strategy would force a second full
+// copy. Create the final name exclusively (O_CREAT|O_EXCL) and stream once.
+// The trade-off is that readers can see an in-progress file until completion.
+// Other filesystems keep atomic temp-file + hard-link publication; explicit
+// overwrites always keep temp-file + rename.
 async function copyAtomic(
   task: FileTask, target: string, overwrite: boolean, signal: AbortSignal, gate: PauseGate,
-  onBytes: (size: number) => void = () => {}
+  onBytes: (size: number) => void = () => {},
+  onMode: (mode: 'direct' | 'atomic') => void = () => {}
 ): Promise<void> {
+  const direct = !overwrite && await chooseWriteMode(path.dirname(target)) === 'direct';
+  onMode(direct ? 'direct' : 'atomic');
   const temp = path.join(path.dirname(target), '.network-sync-' + randomUUID() + '.tmp');
+  const outputPath = direct ? target : temp;
+  let exclusiveHandle: Awaited<ReturnType<typeof open>> | null = null;
+  let exclusiveStream: Writable | null = null;
+  let ownedFile: { dev: number; ino: number } | null = null;
+  let completed = false;
   try {
     aborted(signal);
     const canonical = await realpath(task.sourcePath);
@@ -179,9 +190,19 @@ async function copyAtomic(
       throw new ValidationError('Le fichier source a quitté la racine source.');
     }
     const before = await lstat(task.sourcePath);
-    if (!before.isFile() || !isUnchanged(task, before)) throw new ValidationError('Source modifiée depuis l’analyse : ' + task.sourcePath);
+    if (!before.isFile() || !isUnchanged(task, before)) {
+      throw new ValidationError('Source modifiée depuis l’analyse : ' + task.sourcePath);
+    }
+
+    // Open the final path exclusively before streaming: an existing file is
+    // never truncated, even if another writer created it after our scan.
+    if (direct) {
+      exclusiveHandle = await open(target, 'wx', 0o644);
+      const ownedStat = await exclusiveHandle.stat();
+      ownedFile = { dev: ownedStat.dev, ino: ownedStat.ino };
+    }
+
     // Pause between stream chunks, including during long video copies.
-    // The temp file stays open and is cleaned up if cancelled while paused.
     const pauseStream = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         void gate.wait(signal).then(
@@ -193,18 +214,36 @@ async function copyAtomic(
     await pipeline(
       createReadStream(task.sourcePath),
       pauseStream,
-      createWriteStream(temp, { flags: 'wx', mode: 0o644 }),
+      exclusiveHandle
+        ? (exclusiveStream = exclusiveHandle.createWriteStream({ autoClose: false }))
+        : createWriteStream(temp, { flags: 'wx', mode: 0o644 }),
       { signal }
     );
     await gate.wait(signal);
     const after = await lstat(task.sourcePath);
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+    if (!isUnchanged(task, after)) {
       throw new Error('Le fichier source a été modifié pendant sa copie.');
     }
-    await utimes(temp, before.atime, before.mtime);
+    if (exclusiveHandle) {
+      // Update the opened inode, not an unrelated file swapped into its path.
+      await exclusiveHandle.utimes(before.atime, before.mtime);
+    } else {
+      await utimes(outputPath, before.atime, before.mtime);
+    }
     aborted(signal);
+
+    if (direct) {
+      const published = await lstat(target);
+      if (!ownedFile || !published.isFile() || published.isSymbolicLink() ||
+          published.dev !== ownedFile.dev || published.ino !== ownedFile.ino ||
+          published.size !== before.size) {
+        throw new Error('La cible a changé pendant son écriture directe.');
+      }
+      completed = true;
+      return;
+    }
     if (overwrite) {
-      // The user explicitly selected overwrite; still refuse symlinks.
+      // Overwriting is an explicit user choice, so atomic rename is allowed.
       const current = await occupantAt(target, new Map());
       if (current !== null) {
         await rename(temp, target);
@@ -213,12 +252,27 @@ async function copyAtomic(
     }
     const mode = await publishWithoutOverwrite(temp, target);
     if (mode === 'copied') {
-      // Hard links carry the temporary file's metadata automatically; a
-      // copyFile fallback needs a separate best-effort timestamp update.
+      // The hard-link fallback requires a second full copy only on filesystems
+      // without hard-links that were not detected or explicitly configured.
       await utimes(target, before.atime, before.mtime).catch(() => {});
     }
   } finally {
-    await rm(temp, { force: true }).catch(() => {});
+    // On an aborted/error direct copy, remove only the file owned by this run.
+    // A different inode might have been published meanwhile: never unlink it.
+    if (exclusiveHandle) {
+      // FileHandle.close() waits for its live stream. Explicitly destroy the
+      // finished/aborted autoClose:false stream before closing the handle.
+      exclusiveStream?.destroy();
+      await exclusiveHandle.close().catch(() => {});
+      if (!completed && ownedFile) {
+        const actual = await lstat(target).catch(() => null);
+        if (ownedFile.ino !== 0 && actual?.isFile() && !actual.isSymbolicLink() &&
+            actual.dev === ownedFile.dev && actual.ino === ownedFile.ino) {
+          await unlink(target).catch(() => {});
+        }
+      }
+    }
+    if (!direct) await rm(temp, { force: true }).catch(() => {});
   }
 }
 
@@ -335,7 +389,8 @@ export async function executeSync(
           await ensureDestinationDirectory(destinationRoot, path.dirname(target), !progress.dryRun);
           if (!progress.dryRun) {
             meter?.beginFile(task.size);
-            await copyAtomic(task, target, action === 'overwrite', signal, gate, bytes => meter?.chunk(bytes));
+            await copyAtomic(task, target, action === 'overwrite', signal, gate,
+              bytes => meter?.chunk(bytes), mode => { progress.writeMode = mode; onUpdate(); });
             progress.bytesCopied += task.size;
             meter?.completeFile();
           } else {

@@ -4,7 +4,7 @@ Network Sync est une application de transfert **unidirectionnel** des dossiers d
 
 ## Fonctionnalités
 
-**Compatibilité volumes USB Synology :** la publication d'une copie utilise un lien physique pour éviter l'écrasement accidentel sur les systèmes de fichiers compatibles. Si le périphérique USB refuse les liens physiques (par exemple `EPERM` sur `link`, fréquent avec exFAT/FAT), Network Sync utilise automatiquement une copie exclusive (`COPYFILE_EXCL`) qui refuse tout nom déjà présent. Cette solution effectue une deuxième copie sur le disque USB et le fichier final peut être brièvement visible avant la fin de la publication ; les fichiers préexistants ne sont jamais écrasés par ce mode. Les dossiers internes `@eaDir` et `#recycle` ne sont pas parcourus.
+**Compatibilité volumes USB Synology :** sur une destination **exFAT reconnue**, Network Sync optimise automatiquement les nouvelles copies en **écriture directe exclusive** (`wx`, une seule copie). La création exclusive protège les fichiers existants contre tout écrasement, même s'ils apparaissent pendant l'opération. Le fichier définitif peut cependant être **visible et incomplet pendant le transfert** ; il est supprimé en cas d'erreur/annulation lorsque le programme peut confirmer qu'il lui appartient. Un arrêt brutal du NAS ou du conteneur peut laisser un fichier partiel : ne pas considérer les noms visibles en cours de copie comme des fichiers terminés. Les autres volumes conservent la publication atomique via un fichier temporaire et un lien physique ; si les liens ne sont pas pris en charge, la copie exclusive de repli reste possible. L'option d'écrasement conserve le transfert temporaire et le renommage. Les dossiers internes `@eaDir` et `#recycle` ne sont pas parcourus.
 
 
 - Plusieurs tâches indépendantes, chacune avec 1 à 30 dossiers sources et une destination.
@@ -22,6 +22,18 @@ Network Sync est une application de transfert **unidirectionnel** des dossiers d
 - **Pause / reprise** des synchronisations et simulations actives : l'exploration est suspendue et la copie peut être suspendue entre les blocs de données, sans abandonner le fichier temporaire.
 - Explorateur des répertoires autorisés, interface responsive, authentification HTTP Basic.
 - En mode **copie**, aucune suppression de fichiers sources ; en mode **déplacement**, suppression individuelle après vérification, sans purge des fichiers exclus ou ignorés. Liens symboliques ignorés dans les sources, refusés dans les chemins de destination.
+
+## Optimisation des écritures sur exFAT USB
+
+Le paramètre d'environnement `NETWORK_SYNC_WRITE_MODE` vaut `auto` par défaut et peut être défini dans `.env` avec Docker Manager :
+
+- `auto` : écriture directe si le système de fichiers est identifié comme exFAT (type Linux exFAT ou montage FUSE explicitement nommé exFAT), méthode traditionnelle sinon.
+- `direct` : impose l'écriture directe exclusive, utile si un pilote Synology expose exFAT simplement comme `fuseblk` ; à utiliser uniquement sur le volume prévu, après avoir vérifié le format.
+- `atomic` : impose le mode historique (fichier temporaire puis publication sans remplacement ; risque de double copie si les liens physiques sont indisponibles).
+
+L'interface indique **« Mode optimisé : écriture directe exclusive (une seule copie) »** pendant la copie si le mode est bien employé. Pour des volumes de destination mixtes, préférer `auto` ; l'override `direct` s'applique à tous les nouveaux fichiers des tâches du conteneur, pas seulement au disque USB.
+
+**Compromis :** en `direct`, l'écriture est exclusive mais **pas atomique** pour les lecteurs extérieurs. Des fichiers partiels peuvent subsister après une coupure d'alimentation ou un arrêt forcé. Après un tel incident, vérifier les fichiers concernés avant de relancer une tâche utilisant la simple comparaison par taille ; SHA-256 est préférable. Une suppression de source en mode déplacement n'intervient qu'après vérification complète du fichier de destination par SHA-256.
 
 ## Exemple Synology
 

@@ -37,7 +37,7 @@
       @if (selected; as job) {
         <div class="heading-row">
           <div><div class="eyebrow">CONFIGURATION DE TÂCHE</div><h1>{{ job.name }}</h1>
-            <p class="muted">Fusion des fichiers de {{ job.sources.length }} source(s) dans une destination unique.</p></div>
+            <p class="muted">{{ job.operation === 'move' ? 'Déplacement' : 'Copie' }} depuis {{ job.sources.length }} source(s) vers une destination unique · {{ job.layout === 'flat' ? 'à plat' : 'avec arborescence' }}.</p></div>
           <div class="heading-actions">
             <button class="button secondary" (click)="edit(job)">Modifier</button>
             <button class="button ghost danger" (click)="remove(job)">Supprimer</button>
@@ -57,10 +57,13 @@
               <div class="path-line"><span class="path-index">{{ $index + 1 }}</span><code>{{ source }}</code></div>
             }
           </div>
-          <div class="path-arrow">↓ <span>Arborescence relative préservée</span></div>
+          <div class="path-arrow">↓ <span>{{ job.layout === 'flat' ? 'Fichiers directement à la racine' : 'Arborescence relative préservée' }}</span></div>
           <div class="panel-title destination"><span class="panel-icon teal">↓</span><div><h2>Destination</h2><p>Racine commune pour toutes les sources.</p></div></div>
           <div class="destination-path"><code>{{ job.destination }}</code></div>
-          <p class="helper">Exemple : <code>2026/01/photo.jpg</code> est copié dans <code>{{ job.destination }}/2026/01/photo.jpg</code>.</p>
+          <p class="helper">Exemple : <code>2026/01/photo.jpg</code> est {{ job.operation === 'move' ? 'déplacé' : 'copié' }} dans <code>{{ job.destination }}/{{ job.layout === 'flat' ? 'photo.jpg' : '2026/01/photo.jpg' }}</code>.</p>
+          @if (job.operation === 'move') {
+            <p class="helper">Après transfert et vérification SHA-256, les fichiers sources sont supprimés. En cas d’erreur ou de conflit ignoré, ils sont conservés.</p>
+          }
           <div class="rule-filter-summary">
             <p class="helper">Extensions :
               @if (job.extensions?.length) {
@@ -82,7 +85,7 @@
         </section>
 
         <section class="panel operation">
-          <div class="panel-title"><span class="panel-icon purple">↻</span><div><h2>Exécuter la synchronisation</h2><p>Copie unidirectionnelle, sans suppression des fichiers.</p></div></div>
+          <div class="panel-title"><span class="panel-icon purple">↻</span><div><h2>Exécuter la synchronisation</h2><p>{{ job.operation === 'move' ? 'Déplacement unidirectionnel : sources supprimées après vérification.' : 'Copie unidirectionnelle : aucun fichier source supprimé.' }}</p></div></div>
           <div class="operation-actions">
             @if (selectedRun; as progress) {
               @if (progress.status === 'paused') {
@@ -92,15 +95,15 @@
               }
               <button class="button danger-outline" (click)="cancel(job)">Annuler l'exécution</button>
             } @else {
-              <button class="button primary" [disabled]="!!active" (click)="run(job, false)">▶ Synchroniser</button>
+              <button class="button primary" [disabled]="!!active" (click)="run(job, false)">▶ {{ job.operation === 'move' ? 'Déplacer' : 'Synchroniser' }}</button>
               <button class="button secondary" [disabled]="!!active" (click)="run(job, true)">Simuler (sans copie)</button>
             }
           </div>
           @if (selectedRun; as progress) {
             <div class="progress-area">
-              <div class="progress-heading"><strong>{{ progress.dryRun ? 'Simulation' : 'Synchronisation' }} · {{ progress.status === 'paused' ? 'En pause' : progress.phase === 'scanning' ? 'Analyse des sources' : 'Copie des fichiers' }}</strong><span>{{ percentage(progress) }} %</span></div>
+              <div class="progress-heading"><strong>{{ progress.dryRun ? 'Simulation' : 'Synchronisation' }} · {{ progress.status === 'paused' ? 'En pause' : progress.phase === 'scanning' ? 'Analyse des sources' : job.operation === 'move' ? 'Déplacement des fichiers' : 'Copie des fichiers' }}</strong><span>{{ percentage(progress) }} %</span></div>
               <div class="progress-track"><div class="progress-fill" [style.width.%]="percentage(progress)"></div></div>
-              <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à copier' : 'copiés' }} · {{ progress.skipped }} ignorés · {{ progress.excluded ?? 0 }} exclus · {{ progress.errors }} erreurs</span></div>
+              <div class="progress-details"><span>{{ progress.processed }} / {{ progress.filesTotal }} fichiers</span><span>{{ progress.copied }} {{ progress.dryRun ? 'à transférer' : 'transférés' }} · @if (job.operation === 'move') { {{ progress.moved ?? 0 }} {{ progress.dryRun ? 'à supprimer à la source' : 'supprimés à la source' }} · } {{ progress.skipped }} ignorés · {{ progress.excluded ?? 0 }} exclus · {{ progress.errors }} erreurs</span></div>
               @if (progress.currentFile) { <p class="current-file" [title]="progress.currentFile">{{ progress.currentFile }}</p> }
             </div>
           }
@@ -115,7 +118,7 @@
                   <summary>
                     <span class="run-status" [class.success]="run.status === 'completed'" [class.warning]="run.errors > 0">{{ statusLabel(run.status) }}</span>
                     <span>{{ date(run.startedAt) }} @if (run.dryRun) { <span class="simulated">Simulation</span> }</span>
-                    <span class="history-numbers">{{ run.copied }} copiés · {{ run.skipped }} ignorés · {{ run.renamed }} renommés</span>
+                    <span class="history-numbers">{{ run.copied }} transférés · @if (run.operation === 'move') { {{ run.moved ?? 0 }} déplacés · } {{ run.skipped }} ignorés · {{ run.renamed }} renommés</span>
                     <span class="history-expand">⌄</span>
                   </summary>
                   <div class="history-detail">
@@ -131,10 +134,10 @@
         </section>
       } @else {
         <div class="empty-landing"><div class="landing-symbol">⇄</div><h1>Synchronisez vos dossiers NAS</h1>
-          <p>Créez une tâche avec plusieurs dossiers sources et une destination. Les sous-dossiers seront conservés automatiquement.</p>
+          <p>Créez une tâche avec plusieurs dossiers sources et une destination. Choisissez une copie ou un déplacement, avec ou sans arborescence.</p>
           <button class="button primary" (click)="edit()">＋ Créer une synchronisation</button></div>
       }
-      <footer>Network Sync · Copie sans suppression · Les liens symboliques sont ignorés</footer>
+      <footer>Network Sync · Copie ou déplacement · Les liens symboliques sont ignorés</footer>
     </div>
   </main>
 </div>
@@ -158,6 +161,24 @@
         }
         <label class="field-label" for="destination">Destination</label>
         <div class="input-group"><input id="destination" class="field mono" [(ngModel)]="form.destination" placeholder="Choisir une destination ou saisir son chemin"><button class="small-button" (click)="openBrowser('destination')">Parcourir</button></div>
+        <div class="two-fields">
+          <div><label class="field-label" for="operation">Opération sur les fichiers</label>
+            <select id="operation" class="field" [(ngModel)]="form.operation">
+              <option value="copy">Copier (conserver les sources)</option>
+              <option value="move">Déplacer (supprimer les sources vérifiées)</option>
+            </select></div>
+          <div><label class="field-label" for="layout">Organisation à destination</label>
+            <select id="layout" class="field" [(ngModel)]="form.layout">
+              <option value="tree">Conserver l'arborescence (par défaut)</option>
+              <option value="flat">À plat (fichiers à la racine)</option>
+            </select></div>
+        </div>
+        @if (form.operation === 'move') {
+          <p class="helper">Attention : les fichiers sources seront supprimés uniquement après vérification SHA-256 de la destination. En cas de conflit ignoré ou de transfert incomplet, ils seront conservés. Une simulation est recommandée avant le premier déplacement.</p>
+        }
+        @if (form.layout === 'flat') {
+          <p class="helper">Les fichiers de tous les sous-dossiers arrivent directement à la destination. Deux fichiers de même nom suivent la règle de conflit choisie ci-dessous.</p>
+        }
         <div class="two-fields">
           <div><label class="field-label" for="conflict">En cas de différence</label>
             <select id="conflict" class="field" [(ngModel)]="form.conflictPolicy">
@@ -250,7 +271,7 @@
             </label>
             <p class="helper">Regex JavaScript sur le nom seul, extension comprise, sans chemin de dossier. Exemple : <code>^IMG_[0-9]+\.(jpg|heic)$</code>. Les expressions coûteuses (groupes répétés, lookarounds et références arrière) sont refusées.</p>
           </div>
-          <p class="helper">Les filtres d’extension, de taille et de nom se cumulent : un fichier doit respecter tous les critères pour être copié.</p>
+          <p class="helper">Les filtres d’extension, de taille et de nom se cumulent : un fichier doit respecter tous les critères pour être transféré.</p>
         </div>
         <label class="field-label" for="cron">Planification cron (facultative)</label>
         <input id="cron" class="field mono" [(ngModel)]="form.cron" placeholder="0 3 * * *">

@@ -116,6 +116,10 @@ export async function ensureDestinationDirectory(root: string, directory: string
   }
 }
 
+export async function sourceRootFor(directory: string, roots: Roots): Promise<string> {
+  return ensureWithinRoot(directory, roots.sources, true);
+}
+
 export async function destinationRootFor(directory: string, roots: Roots): Promise<string> {
   return ensureWithinRoot(directory, roots.destinations, false);
 }

@@ -18,6 +18,7 @@ interface Job {
   sizeFilter?: SizeFilter | null;
   filenameRegex?: string | null;
   filenameRegexIgnoreCase?: boolean;
+  excludeLivePhotos?: boolean;
 }
 interface JobForm {
   name: string; sources: string[]; destination: string;
@@ -27,6 +28,7 @@ interface JobForm {
   sizeFilter: SizeFilter | null;
   filenameRegex: string;
   filenameRegexIgnoreCase: boolean;
+  excludeLivePhotos: boolean;
 }
 interface DuplicateFile { path: string; size: number; }
 interface DuplicateGroup { id: string; size: number; sha256: string; files: DuplicateFile[]; }
@@ -41,7 +43,7 @@ interface Run {
   transferStartedAt?: string; writeMode?: 'direct' | 'atomic'; transferSpeedBytesPerSec?: number | null;
   transferEtaSeconds?: number | null; lastTransferAtMs?: number;
   bytesCopied: number; copied: number; moved?: number; skipped: number; excluded?: number; renamed: number;
-  overwritten: number; errors: number; errorMessages: string[]; currentFile: string | null;
+  overwritten: number; errors: number; livePhotosExcluded?: number; errorMessages: string[]; currentFile: string | null;
 }
 
 @Component({
@@ -118,7 +120,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private blankForm(): JobForm {
     return { name: '', sources: [''], destination: '', conflictPolicy: 'rename',
       compareMode: 'size', operation: 'copy', layout: 'tree', cron: '', enabled: true, extensions: null,
-      sizeFilter: null, filenameRegex: '', filenameRegexIgnoreCase: false };
+      sizeFilter: null, filenameRegex: '', filenameRegexIgnoreCase: false, excludeLivePhotos: false };
   }
 
   private extractError(error: unknown): string {
@@ -175,7 +177,8 @@ export class AppComponent implements OnInit, OnDestroy {
           extensions: job.extensions ? [...job.extensions] : null,
           sizeFilter: job.sizeFilter ? { ...job.sizeFilter } : null,
           filenameRegex: job.filenameRegex ?? '',
-          filenameRegexIgnoreCase: job.filenameRegexIgnoreCase ?? false }
+          filenameRegexIgnoreCase: job.filenameRegexIgnoreCase ?? false,
+          excludeLivePhotos: job.excludeLivePhotos ?? false }
       : this.blankForm();
     this.formVisible = true;
   }

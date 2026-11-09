@@ -38,7 +38,7 @@ interface Run {
   phase: string; dryRun: boolean; startedAt: string; finishedAt?: string;
   filesTotal: number; candidateFiles?: number; duplicateGroups?: number; bytesTotal: number; processed: number;
   bytesToTransfer?: number; bytesTransferred?: number; currentFileBytes?: number; currentFileSize?: number | null;
-  transferStartedAt?: string; transferSpeedBytesPerSec?: number | null;
+  transferStartedAt?: string; writeMode?: 'direct' | 'atomic'; transferSpeedBytesPerSec?: number | null;
   transferEtaSeconds?: number | null; lastTransferAtMs?: number;
   bytesCopied: number; copied: number; moved?: number; skipped: number; excluded?: number; renamed: number;
   overwritten: number; errors: number; errorMessages: string[]; currentFile: string | null;

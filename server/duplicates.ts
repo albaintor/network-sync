@@ -12,6 +12,7 @@ export interface DuplicateFile {
   mtimeMs: number;
   dev: number;
   ino: number;
+  nlink: number;
 }
 export interface DuplicateGroup {
   id: string;
@@ -70,7 +71,7 @@ async function hashFile(filename: string, signal: AbortSignal, gate: PauseGate):
 
 function sameIdentity(file: DuplicateFile, value: DuplicateFile): boolean {
   return file.size === value.size && file.mtimeMs === value.mtimeMs &&
-    file.dev === value.dev && file.ino === value.ino;
+    file.dev === value.dev && file.ino === value.ino && file.nlink === value.nlink;
 }
 
 function recordError(progress: RunProgress, file: string, error: unknown): void {
@@ -86,7 +87,7 @@ async function verifyFile(file: DuplicateFile, directory: string, canonicalRoot:
   if (!isInside(canonicalRoot, actual)) throw new ValidationError('Chemin réel hors du dossier analysé.');
   const stat = await lstat(file.path);
   if (!stat.isFile() || stat.isSymbolicLink() || !sameIdentity(file, {
-    path: file.path, size: stat.size, mtimeMs: stat.mtimeMs, dev: stat.dev, ino: stat.ino
+    path: file.path, size: stat.size, mtimeMs: stat.mtimeMs, dev: stat.dev, ino: stat.ino, nlink: stat.nlink
   })) {
     throw new ValidationError('Fichier modifié depuis le scan : ' + file.path);
   }
@@ -113,9 +114,10 @@ export async function scanDuplicates(
       if (progress.filesTotal > MAX_FILES) throw new ValidationError('Limite de 200 000 fichiers atteinte. Choisissez un dossier plus restreint.');
       try {
         const info = await lstat(filename);
-        if (!info.isFile() || info.isSymbolicLink()) continue;
+        // Files with multiple hard links do not release their blocks when only one link is removed.
+        if (!info.isFile() || info.isSymbolicLink() || info.nlink > 1) continue;
         const file: DuplicateFile = {
-          path: filename, size: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino
+          path: filename, size: info.size, mtimeMs: info.mtimeMs, dev: info.dev, ino: info.ino, nlink: info.nlink
         };
         const entries = bySize.get(info.size) ?? [];
         entries.push(file);

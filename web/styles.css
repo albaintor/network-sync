@@ -301,3 +301,5 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
   .keep-label { max-width: none; text-align: left; margin-left: 23px; }
   .duplicate-bulk-actions strong { margin-left: 0; flex-basis: 100%; }
 }
+
+.new-job + .new-job { margin-top: 10px; }

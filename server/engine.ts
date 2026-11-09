@@ -233,8 +233,8 @@ async function copyAtomic(
 
     if (direct) {
       const published = await lstat(target);
-      if (!published.isFile() || published.isSymbolicLink() ||
-          published.dev !== ownedFile?.dev || published.ino !== ownedFile.ino ||
+      if (!ownedFile || !published.isFile() || published.isSymbolicLink() ||
+          published.dev !== ownedFile.dev || published.ino !== ownedFile.ino ||
           published.size !== before.size) {
         throw new Error('La cible a changé pendant son écriture directe.');
       }

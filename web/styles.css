@@ -303,3 +303,17 @@ footer { padding-top: 20px; text-align: center; font-size: 10px; color: #4f6684;
 }
 
 .new-job + .new-job { margin-top: 10px; }
+
+/* Live transfer telemetry, sized for NAS copying on desktop and mobile. */
+.transfer-metrics {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px; margin: 18px 0 12px;
+}
+.transfer-metric { background: #0d192a; border: 1px solid #293a52; padding: 12px 14px; border-radius: 9px; min-width: 0; }
+.transfer-metric small { display: block; font-size: 10px; color: #8c9fba; margin-bottom: 7px; }
+.transfer-metric strong { display: block; color: #e7f0ff; font-size: 14px; font-variant-numeric: tabular-nums; line-height: 1.45; overflow-wrap: anywhere; }
+.transfer-bytes-track { margin-top: 6px; }
+.transfer-estimate-note { margin: 11px 0; font-size: 11px; line-height: 1.5; }
+@media (max-width: 550px) {
+  .transfer-metrics { grid-template-columns: 1fr; }
+}

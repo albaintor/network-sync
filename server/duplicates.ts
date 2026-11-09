@@ -218,9 +218,11 @@ export async function deleteDuplicates(
         }
         await verifyFile(file, scan.directory, canonicalRoot);
       }
+      const keeper = group.files.find(file => file.path === choice.keep)!;
       for (const file of group.files) {
         if (file.path === choice.keep) continue;
-        // Recheck the source path just before removing it; do not follow symlinks.
+        // Recheck the keeper and victim immediately before each unlink.
+        await verifyFile(keeper, scan.directory, canonicalRoot);
         await verifyFile(file, scan.directory, canonicalRoot);
         await unlink(file.path);
         result.deleted++;
